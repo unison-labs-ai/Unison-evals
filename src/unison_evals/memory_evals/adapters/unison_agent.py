@@ -7,11 +7,30 @@ provided context only — brain/FS/workspace tools are stripped server-side).
 
 from __future__ import annotations
 
+import hashlib
+import re
 import time
 from typing import Any
 
 import httpx
 from loguru import logger
+
+
+def _to_writable_seed_path(path: str, ns: str) -> str:
+    """Map an eval-corpus document path into a path the Unison brain accepts.
+
+    The brain's write-path contract only allows writes under /private, /teams,
+    /tenant, /wiki, /skills; ingest-style /private/sources/* is accepted by the
+    eval-turn seed path (brain.write bypasses the user-facing gate). Eval datasets
+    use roots like /sessions/<id>.md, which the brain rejects. We flatten the
+    original path into a single slugged filename under a per-question namespace so
+    (a) writes succeed and (b) one question's docs don't overwrite another's.
+    """
+    stem = path.strip("/")
+    if stem.endswith(".md"):
+        stem = stem[:-3]
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem.replace("/", "--")).strip("-") or "doc"
+    return f"/private/sources/eval/{ns}/{slug[:120]}.md"
 
 from ...config import get_settings
 from ...types import AdapterResult, Document
@@ -21,6 +40,11 @@ from .base import AgentAdapter
 
 class UnisonAgentAdapter(AgentAdapter):
     name = "unison-agent"
+    # "raw" = seed docs as-is (skips the brain's extract→promote→compact
+    # pipeline). "pipeline" = the honest memory-pipeline test (server seeds as
+    # notes, drives extraction in a fresh per-question sub-tenant). Subclassed
+    # below as `unison-agent-pipeline` so a run can compare both side by side.
+    ingest_mode: str = "raw"
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -79,11 +103,18 @@ class UnisonAgentAdapter(AgentAdapter):
         if oracle_context is not None:
             body["oracleContext"] = oracle_context
         if seed_docs is not None:
+            # Per-question namespace so one question's seeded docs don't collide
+            # with another's in the shared eval tenant.
+            ns = hashlib.sha256(question.encode()).hexdigest()[:10]
             # kind="raw" skips Unison's extract pipeline (Gemini calls per doc),
             # which is critical for cost in per-question-haystack benchmarks.
             body["seedDocs"] = [
-                {"path": doc.path, "body": doc.body, "kind": "raw"} for doc in seed_docs
+                {"path": _to_writable_seed_path(doc.path, ns), "body": doc.body, "kind": "raw"}
+                for doc in seed_docs
             ]
+            # "pipeline" tells the server to seed as notes, run a fresh
+            # per-question sub-tenant through extract→promote→compact, then answer.
+            body["ingestMode"] = self.ingest_mode
 
         start = time.perf_counter()
         try:
@@ -145,3 +176,12 @@ class UnisonAgentAdapter(AgentAdapter):
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+
+class UnisonAgentPipelineAdapter(UnisonAgentAdapter):
+    """Same agent, but exercises the real memory pipeline (extract → promote →
+    compact) in a fresh per-question sub-tenant instead of dumping raw docs.
+    Register as `unison-agent-pipeline` to compare against `unison-agent`."""
+
+    name = "unison-agent-pipeline"
+    ingest_mode = "pipeline"

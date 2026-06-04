@@ -4,7 +4,7 @@ Context-Bench uses a SINGLE fixed corpus (11 files) shared by all 100
 questions, so isolation is **per-run** (ADR-0008), not per-question:
 
   setup()  → provision one ephemeral `is_eval` tenant, seed the corpus
-             into /wiki/ once.
+             into /private/sources/eval/context-bench/ once.
   ask(q)   → run one question against that tenant with memoryMode="fresh"
              (no extraction residue between questions; corpus stays put).
   close()  → hard-delete the ephemeral tenant.
@@ -90,8 +90,8 @@ class UnisonContextBenchTarget:
             raise RuntimeError("setup() must be called before ask()")
 
         framing = (
-            "You are an analyst with read-only access to ten data files under /wiki/. "
-            "Start by reading /wiki/SCHEMA.md to learn the layout, then use bash "
+            "You are an analyst with read-only access to ten data files under /private/sources/eval/context-bench/. "
+            "Start by reading /private/sources/eval/context-bench/SCHEMA.md to learn the layout, then use bash "
             "(cat, grep, awk, sort, etc.) to answer the question below. Cross-reference "
             "files via shared id fields (e.g. person_id) as needed. When you have the "
             "answer, reply with it directly — no preamble.\n\n"

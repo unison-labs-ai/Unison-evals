@@ -51,7 +51,7 @@ _TENANT_SCOPED_RESET_TABLES = (
     "cortex_escalations",
     # Background-job queue (kill any pending extract.turn etc.)
     "cortex_jobs",
-    # Entity graph (re-built from /wiki/ on next turn)
+    # Entity graph (re-built from /private/taubench/ on next turn)
     "cortex_aliases",
     "cortex_entities",
     "cortex_links",
@@ -109,7 +109,7 @@ async def seed_pages(
         await conn.close()
 
 
-async def snapshot_wiki(tenant_id: str, prefix: str = "/wiki/") -> dict[str, str]:
+async def snapshot_wiki(tenant_id: str, prefix: str = "/private/taubench/") -> dict[str, str]:
     """Return {path: body_md} for every live wiki page under prefix."""
     conn = await _connect()
     try:
@@ -264,5 +264,5 @@ def seed_pages_sync(tenant_id: str, user_id: str, pages: list[BrainPage]) -> int
     return asyncio.run(seed_pages(tenant_id, user_id, pages))
 
 
-def snapshot_wiki_sync(tenant_id: str, prefix: str = "/wiki/") -> dict[str, str]:
+def snapshot_wiki_sync(tenant_id: str, prefix: str = "/private/taubench/") -> dict[str, str]:
     return asyncio.run(snapshot_wiki(tenant_id, prefix))

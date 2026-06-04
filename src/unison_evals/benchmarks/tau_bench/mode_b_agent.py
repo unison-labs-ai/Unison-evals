@@ -12,7 +12,7 @@ For each task:
        f. Break on env_response.done or max_num_steps.
 
 The agent itself is unaware τ-bench exists — it just gets a user message,
-reads /wiki/, mutates /wiki/, replies. All τ-bench-specific glue lives
+reads /private/taubench/, mutates /private/taubench/, replies. All τ-bench-specific glue lives
 in the translator, never inside Unison.
 """
 
@@ -99,16 +99,16 @@ class UnisonModeBAgent(Agent):
         # the customer-service framing AND the τ-bench retail policy verbatim
         # into the first user message. This mirrors Mode A, which gets the
         # same policy text as `messages[0].content` (system role). Putting
-        # policy here, not in /wiki/policy.md, gives it the same
+        # policy here, not in /private/taubench/policy.md, gives it the same
         # authoritative framing both modes get — without it the agent reads
         # policy as advisory text and over-applies the "verify identity"
         # rules to refuse legitimate authenticated exchanges.
         first_question = (
             "You are a customer service agent for an online retail store. "
-            "Your workspace is at /wiki/ — start by reading /wiki/SCHEMA.md "
+            "Your workspace is at /private/taubench/ — start by reading /private/taubench/SCHEMA.md "
             "to learn the layout and the navigation recipes. Help the "
             "customer below by reading and (when needed) editing files "
-            "under /wiki/orders/, /wiki/users/, /wiki/products/. Reply "
+            "under /private/taubench/orders/, /private/taubench/users/, /private/taubench/products/. Reply "
             "directly to the customer in your final message.\n\n"
             "═══ STORE POLICY (binding — follow exactly) ═══\n"
             f"{env.wiki}\n"

@@ -18,12 +18,12 @@ Two modes that run the **same model on the same task set with the same user-simu
 | Mode | Tool surface | Purpose |
 |---|---|---|
 | **A** (`smoke.py`) | τ-bench's native typed function-call tools | Control cell |
-| **B** (`run_mode_b.py`) | Unison's single `bash` tool over a virtual `/wiki/<table>/<id>.md` filesystem | Treatment cell — tests Unison's "everything is a .md filesystem" thesis |
+| **B** (`run_mode_b.py`) | Unison's single `bash` tool over a virtual `/private/taubench/<table>/<id>.md` filesystem | Treatment cell — tests Unison's "everything is a .md filesystem" thesis |
 
 Mode B's mechanism:
-1. Seed `env.data` into Unison's brain as `/wiki/orders/<id>.md`, `/wiki/users/<id>.md`, `/wiki/products/<id>.md` (JSON-in-fenced-block codec; see `md_overlay.py`).
+1. Seed `env.data` into Unison's brain as `/private/taubench/orders/<id>.md`, `/private/taubench/users/<id>.md`, `/private/taubench/products/<id>.md` (JSON-in-fenced-block codec; see `md_overlay.py`).
 2. Agent navigates + mutates via `bash` (cat / grep / sed / heredoc).
-3. After each agent turn, snapshot `/wiki/` and diff vs the previous snapshot → translate to τ-bench `Action` calls via `action_translator.py` → run through `env.step()` so policy guards still fire.
+3. After each agent turn, snapshot `/private/taubench/` and diff vs the previous snapshot → translate to τ-bench `Action` calls via `action_translator.py` → run through `env.step()` so policy guards still fire.
 
 The translator is the load-bearing piece: it must dispatch every brain mutation through `env.step()` (not direct `env.data` mutation), so policy enforcement remains identical to Mode A.
 
@@ -105,6 +105,6 @@ results/tau-bench/
 | `smoke.py` | Mode A entry — wraps τ-bench's stock `tool_calling_agent` |
 | `run_mode_b.py` | Mode B entry — drives `UnisonModeBAgent` over the task set |
 | `mode_b_agent.py` | `UnisonModeBAgent(tau_bench.Agent)` — multi-turn loop driving Unison via `/api/rest/agents/eval-turn` |
-| `md_overlay.py` | `env.data` ↔ `/wiki/<table>/<id>.md` codec (JSON-in-fenced-block, round-trip-safe for position-sensitive lists) |
+| `md_overlay.py` | `env.data` ↔ `/private/taubench/<table>/<id>.md` codec (JSON-in-fenced-block, round-trip-safe for position-sensitive lists) |
 | `action_translator.py` | Brain-state diff → `tau_bench.Action` dispatcher (multiset diff over `items[]`; handles cancel / exchange / return / modify variants) |
 | `brain_client.py` | Postgres-direct seed / snapshot / wipe / trajectory dump against the eval tenant |

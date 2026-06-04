@@ -23,9 +23,9 @@ This is the publishable architectural test:
 
 | Cell | Tool surface | Score |
 |---|---|---|
-| Letta agent + Sonnet 4.5 | `open_files` + `grep_files` (two purpose-built tools) | **74.0%** (leaderboard.letta.com) |
-| Letta agent + GPT-5 | same | 72.67% |
-| **Unison + Sonnet 4.5** | **single `bash` over `/wiki/*.txt`** | **measure here** |
+| Letta agent + GPT-5.2-codex | `open_files` + `grep_files` (two purpose-built tools) | **93%** (leaderboard.letta.com, 2026-03-13) |
+| Letta agent + Sonnet 4.6 | same | **88%** |
+| **Unison + Sonnet 4.5** | **single `bash` over `/private/sources/eval/context-bench/*.md`** | **measure here** |
 
 Same model. Same corpus. Same dataset. Same judge. Same rubric. Only the **interface** differs.
 
@@ -35,7 +35,7 @@ Same model. Same corpus. Same dataset. Same judge. Same rubric. Only the **inter
 context_bench/
 ├── README.md          ← this file
 ├── __init__.py
-├── seed.py            ← preload the 10 .txt files into /wiki/ + write a SCHEMA.md
+├── seed.py            ← preload the 10 corpus files into /private/sources/eval/context-bench/ + a SCHEMA.md
 ├── target.py          ← UnisonContextBenchTarget — one-shot Q&A via /eval-turn
 ├── judge.py           ← LLM-judge using Letta's vendored rubric.txt
 └── run.py             ← CLI entry; loads dataset, runs target, grades, writes summary

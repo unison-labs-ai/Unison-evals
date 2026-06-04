@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # Unison API
     unison_api_url: str = "http://localhost:3001"
     unison_jwt: str = ""
+    # Secret-gated eval lifecycle (ADR-0008). When set, the unison-agent adapter
+    # sends it as the X-Unison-Eval header and provisions a fresh ephemeral
+    # tenant per question (memory benches) — no Supabase JWT needed. Required to
+    # run reproducible, isolated benchmarks against the deployed (prod) app.
+    unison_eval_secret: str = ""
 
     # Anthropic (judge + claude-code adapter cost accounting)
     anthropic_api_key: str = ""

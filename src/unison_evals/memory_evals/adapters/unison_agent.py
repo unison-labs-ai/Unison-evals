@@ -49,21 +49,32 @@ class UnisonAgentAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.settings = get_settings()
         self._client: httpx.AsyncClient | None = None
+        self._isolate_per_question: bool = False
 
     async def setup(self) -> None:
         is_localhost = is_localhost_url(self.settings.unison_api_url)
         has_jwt = bool(self.settings.unison_jwt)
+        has_secret = bool(self.settings.unison_eval_secret)
 
-        if not has_jwt and not is_localhost:
+        if not has_jwt and not has_secret and not is_localhost:
             raise RuntimeError(
-                "UNISON_JWT not set. Required when UNISON_API_URL is not localhost.\n"
-                "For local dev: set UNISON_API_URL=http://localhost:3001 and configure\n"
-                "UNISON_LOCAL_EVAL_TENANT_ID on your local Unison server — JWT becomes unnecessary."
+                "Neither UNISON_EVAL_SECRET nor UNISON_JWT set. One is required when\n"
+                "UNISON_API_URL is not localhost. Preferred: set UNISON_EVAL_SECRET to the\n"
+                "server's value — the adapter then provisions a fresh ephemeral tenant per\n"
+                "question (ADR-0008), no Supabase JWT needed. For local dev: point at\n"
+                "http://localhost:3001 with UNISON_LOCAL_EVAL_TENANT_ID on the server."
             )
+
+        # ADR-0008: when the eval secret is configured, every question runs in a
+        # freshly-provisioned ephemeral tenant that is torn down afterward — true
+        # per-question isolation, no cross-question retrieval contamination.
+        self._isolate_per_question = has_secret
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if has_jwt:
             headers["Authorization"] = f"Bearer {self.settings.unison_jwt}"
+        if has_secret:
+            headers["X-Unison-Eval"] = self.settings.unison_eval_secret
 
         self._client = httpx.AsyncClient(
             base_url=self.settings.unison_api_url,
@@ -104,7 +115,8 @@ class UnisonAgentAdapter(AgentAdapter):
             body["oracleContext"] = oracle_context
         if seed_docs is not None:
             # Per-question namespace so one question's seeded docs don't collide
-            # with another's in the shared eval tenant.
+            # with another's (belt-and-suspenders; the ephemeral tenant already
+            # isolates when self._isolate_per_question is on).
             ns = hashlib.sha256(question.encode()).hexdigest()[:10]
             # kind="raw" skips Unison's extract pipeline (Gemini calls per doc),
             # which is critical for cost in per-question-haystack benchmarks.
@@ -115,6 +127,23 @@ class UnisonAgentAdapter(AgentAdapter):
             # "pipeline" tells the server to seed as notes, run a fresh
             # per-question sub-tenant through extract→promote→compact, then answer.
             body["ingestMode"] = self.ingest_mode
+
+        # ADR-0008: provision a throwaway tenant for this single question, run the
+        # turn against it with memoryMode="fresh", and tear it down afterward —
+        # zero cross-question contamination. Skipped on the localhost-bypass path.
+        tenant_id: str | None = None
+        if self._isolate_per_question:
+            tenant_id = await self._provision_tenant()
+            if tenant_id is None:
+                return AdapterResult(
+                    answer="",
+                    cost_usd=0.0,
+                    latency_ms=0.0,
+                    raw={},
+                    error="failed to provision ephemeral eval tenant",
+                )
+            body["tenantId"] = tenant_id
+            body["memoryMode"] = "fresh"
 
         start = time.perf_counter()
         try:
@@ -171,6 +200,38 @@ class UnisonAgentAdapter(AgentAdapter):
                 raw={},
                 error=f"HTTP error: {e}",
             )
+        finally:
+            if tenant_id is not None:
+                await self._teardown_tenant(tenant_id)
+
+    async def _provision_tenant(self) -> str | None:
+        """Provision a fresh ephemeral eval tenant (ADR-0008). Returns its
+        tenantId, or None on failure."""
+        assert self._client is not None
+        try:
+            resp = await self._client.post(
+                "/api/rest/agents/eval/provision", json={"label": "longmemeval"}
+            )
+            if resp.status_code != 200:
+                logger.warning("eval/provision failed", status=resp.status_code, body=resp.text[:300])
+                return None
+            return str(resp.json().get("tenantId")) or None
+        except httpx.HTTPError as e:
+            logger.warning("eval/provision error", error=str(e))
+            return None
+
+    async def _teardown_tenant(self, tenant_id: str) -> None:
+        """Hard-delete an ephemeral eval tenant. Best-effort; logs on failure so a
+        stuck teardown never fails the question (a reaper sweeps stragglers)."""
+        assert self._client is not None
+        try:
+            resp = await self._client.post(
+                "/api/rest/agents/eval/teardown", json={"tenantId": tenant_id}
+            )
+            if resp.status_code != 200:
+                logger.warning("eval/teardown failed", status=resp.status_code, body=resp.text[:300])
+        except httpx.HTTPError as e:
+            logger.warning("eval/teardown error", tenant=tenant_id, error=str(e))
 
     async def teardown(self) -> None:
         if self._client is not None:

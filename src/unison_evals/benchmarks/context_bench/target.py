@@ -1,12 +1,17 @@
 """Thin HTTP client for Unison's `/api/rest/agents/eval-turn`.
 
-One question → one answer. Wipes + reseeds the tenant brain per
-question so every row is iid (the published Context-Bench cell does
-the same via Letta's per-task setup_script).
+Context-Bench uses a SINGLE fixed corpus (11 files) shared by all 100
+questions, so isolation is **per-run** (ADR-0008), not per-question:
 
-The default tenant + user IDs match the Unison local-dev eval tenant
-created earlier in this project. Override with constructor args for a
-hosted Unison.
+  setup()  → provision one ephemeral `is_eval` tenant, seed the corpus
+             into /wiki/ once.
+  ask(q)   → run one question against that tenant with memoryMode="fresh"
+             (no extraction residue between questions; corpus stays put).
+  close()  → hard-delete the ephemeral tenant.
+
+No dedicated tenant, no Supabase JWT, no cross-run residue — the secret
+(`UNISON_EVAL_SECRET`, sent as X-Unison-Eval) is the only auth. On a
+localhost server with UNISON_EVAL_LOCAL_BYPASS the secret is optional.
 """
 
 from __future__ import annotations
@@ -19,8 +24,9 @@ import httpx
 
 from . import seed
 
-DEFAULT_TENANT_ID = "981825b2-33a0-4a0c-8e9b-1d2d671c014f"
-DEFAULT_USER_ID = "4eb0ea0e-7d49-492e-a814-a2434be6f5fb"
+# Throwaway model for the one-time seed turn (the agent answer is discarded;
+# we only need the server-side seedBrainSync to run).
+_SEED_MODEL = "claude-haiku-4-5"
 
 
 @dataclass
@@ -30,35 +36,58 @@ class TargetAnswer:
     total_steps: int
     total_cost_usd: float
     elapsed_s: float
-    wiped_docs: int
     seeded_pages: int
 
 
 class UnisonContextBenchTarget:
-    """One-shot Q&A target: seed → ask → return assistant's final text."""
+    """Per-run-isolated Q&A target: provision+seed once, ask N times, teardown."""
 
     def __init__(
         self,
         api_url: str | None = None,
-        tenant_id: str = DEFAULT_TENANT_ID,
-        user_id: str = DEFAULT_USER_ID,
         model: str = "claude-sonnet-4-5",
         timeout: float = 600.0,
     ) -> None:
         self.api_url = (
             api_url or os.environ.get("UNISON_API_URL") or "http://localhost:3001"
         ).rstrip("/")
-        self.tenant_id = tenant_id
-        self.user_id = user_id
         self.model = model
-        self._client = httpx.Client(
-            base_url=self.api_url,
-            headers={"Content-Type": "application/json"},
-            timeout=timeout,
+        self.eval_secret = os.environ.get("UNISON_EVAL_SECRET", "")
+        headers = {"Content-Type": "application/json"}
+        if self.eval_secret:
+            headers["X-Unison-Eval"] = self.eval_secret
+        self._client = httpx.Client(base_url=self.api_url, headers=headers, timeout=timeout)
+        self.tenant_id: str | None = None
+        self.seeded_pages = 0
+
+    def setup(self) -> None:
+        """Provision a fresh ephemeral tenant and seed the fixed corpus once."""
+        prov = self._client.post(
+            "/api/rest/agents/eval/provision", json={"label": "context-bench"}
         )
+        prov.raise_for_status()
+        self.tenant_id = str(prov.json()["tenantId"])
+
+        docs = seed.corpus_seed_docs()
+        # One seed-bearing turn writes + embeds the corpus server-side. The agent
+        # answer ("READY") is discarded; the docs persist in the tenant for every
+        # subsequent ask(). Cheap throwaway model keeps the seed turn near-free.
+        seed_resp = self._client.post(
+            "/api/rest/agents/eval-turn",
+            json={
+                "tenantId": self.tenant_id,
+                "question": "Reply with the single word READY.",
+                "model": _SEED_MODEL,
+                "memoryMode": "fresh",
+                "seedDocs": docs,
+            },
+        )
+        seed_resp.raise_for_status()
+        self.seeded_pages = int(seed_resp.json().get("seededDocsCount") or len(docs))
 
     def ask(self, question: str) -> TargetAnswer:
-        wiped, seeded = seed.fresh_tenant(self.tenant_id, self.user_id)
+        if self.tenant_id is None:
+            raise RuntimeError("setup() must be called before ask()")
 
         framing = (
             "You are an analyst with read-only access to ten data files under /wiki/. "
@@ -73,9 +102,10 @@ class UnisonContextBenchTarget:
         resp = self._client.post(
             "/api/rest/agents/eval-turn",
             json={
+                "tenantId": self.tenant_id,
                 "question": framing,
                 "model": self.model,
-                # Skip Memory-v2 extract.turn — each row must be iid.
+                # Each row must be iid — skip Memory-v2 extract.turn.
                 "memoryMode": "fresh",
             },
         )
@@ -89,9 +119,19 @@ class UnisonContextBenchTarget:
             total_steps=int(data.get("totalSteps") or 0),
             total_cost_usd=float(data.get("totalCostUsd") or 0.0),
             elapsed_s=elapsed,
-            wiped_docs=wiped,
-            seeded_pages=seeded,
+            seeded_pages=self.seeded_pages,
         )
 
     def close(self) -> None:
-        self._client.close()
+        """Hard-delete the ephemeral tenant, then close the client. Best-effort
+        teardown so a failed delete never masks the run's results."""
+        try:
+            if self.tenant_id is not None:
+                self._client.post(
+                    "/api/rest/agents/eval/teardown", json={"tenantId": self.tenant_id}
+                )
+        except httpx.HTTPError:
+            pass
+        finally:
+            self._client.close()
+            self.tenant_id = None

@@ -1,4 +1,4 @@
-"""Seed Letta's filesystem-agent corpus into a fresh Unison /wiki/ tenant.
+"""Seed Letta's filesystem-agent corpus into a fresh Unison /private/sources/eval/context-bench/ tenant.
 
 The 10 fictional text files (people / pets / vehicles / addresses /
 bank_accounts / credit_cards / employments / insurance_policies /
@@ -37,22 +37,23 @@ CORPUS_FILES = (
 
 SCHEMA_MD = """# Workspace — Context-Bench filesystem corpus
 
-Ten plain-text files under /wiki/ describe a fictional set of people and
-their entities. Files are flat text (line-oriented or pipe-delimited);
-the actual format is documented inside each file.
+Ten data files under /private/sources/eval/context-bench/ describe a fictional set of people and their
+entities. Each file's body is the original plain-text corpus (line-oriented
+or pipe-delimited); the format is documented inside each file. (Files carry a
+.md path so the brain accepts them, but the content is unchanged.)
 
 ## Layout
 
-- `/wiki/people.txt`             — person records (id, name, age, …)
-- `/wiki/addresses.txt`          — address records, linked to people
-- `/wiki/pets.txt`                — pets owned by people
-- `/wiki/vehicles.txt`            — vehicles owned by people
-- `/wiki/employments.txt`         — jobs and employers
-- `/wiki/bank_accounts.txt`       — bank accounts linked to people
-- `/wiki/credit_cards.txt`        — credit cards linked to people
-- `/wiki/insurance_policies.txt`  — insurance policies linked to people
-- `/wiki/internet_accounts.txt`   — online accounts linked to people
-- `/wiki/medical_records.txt`     — medical records linked to people
+- `/private/sources/eval/context-bench/people.md`             — person records (id, name, age, …)
+- `/private/sources/eval/context-bench/addresses.md`          — address records, linked to people
+- `/private/sources/eval/context-bench/pets.md`                — pets owned by people
+- `/private/sources/eval/context-bench/vehicles.md`            — vehicles owned by people
+- `/private/sources/eval/context-bench/employments.md`         — jobs and employers
+- `/private/sources/eval/context-bench/bank_accounts.md`       — bank accounts linked to people
+- `/private/sources/eval/context-bench/credit_cards.md`        — credit cards linked to people
+- `/private/sources/eval/context-bench/insurance_policies.md`  — insurance policies linked to people
+- `/private/sources/eval/context-bench/internet_accounts.md`   — online accounts linked to people
+- `/private/sources/eval/context-bench/medical_records.md`     — medical records linked to people
 
 All cross-references between files use a `person_id` field (or a similar
 key documented inside the file). Questions typically require joining
@@ -62,7 +63,7 @@ across two or more files.
 
 def _build_pages() -> list[BrainPage]:
     pages: list[BrainPage] = [
-        BrainPage(path="/wiki/SCHEMA.md", body_md=SCHEMA_MD, kind="wiki_page"),
+        BrainPage(path="/private/sources/eval/context-bench/SCHEMA.md", body_md=SCHEMA_MD, kind="raw"),
     ]
     missing: list[str] = []
     for name in CORPUS_FILES:
@@ -70,11 +71,14 @@ def _build_pages() -> list[BrainPage]:
         if not src.exists():
             missing.append(str(src))
             continue
+        # The brain write-path requires `.md`; the agent greps these as data
+        # files. Map people.txt -> /private/sources/eval/context-bench/people.md (content byte-identical).
+        stem = name[:-4] if name.endswith(".txt") else name
         pages.append(
             BrainPage(
-                path=f"/wiki/{name}",
+                path=f"/private/sources/eval/context-bench/{stem}.md",
                 body_md=src.read_text(),
-                kind="wiki_page",
+                kind="raw",
             )
         )
     if missing:
@@ -83,6 +87,13 @@ def _build_pages() -> list[BrainPage]:
             "`git submodule update --init vendor/letta-evals`. Missing: " + ", ".join(missing)
         )
     return pages
+
+
+def corpus_seed_docs() -> list[dict]:
+    """The fixed Context-Bench corpus as eval-turn `seedDocs` entries
+    ({path, body, kind}). Used by the ADR-0008 per-run lifecycle to seed the
+    ephemeral tenant once over the API (no direct DB access)."""
+    return [{"path": p.path, "body": p.body_md, "kind": p.kind} for p in _build_pages()]
 
 
 def fresh_tenant(tenant_id: str, user_id: str) -> tuple[int, int]:

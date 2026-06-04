@@ -18,12 +18,13 @@ from .letta import LettaBrainAdapter
 from .mem0 import Mem0AgentAdapter, Mem0BrainAdapter
 from .openai_gpt5 import OpenAIGpt5Adapter
 from .pgvector_naive import PgvectorNaiveBrainAdapter
-from .unison_agent import UnisonAgentAdapter
+from .unison_agent import UnisonAgentAdapter, UnisonAgentPipelineAdapter
 from .unison_brain import UnisonBrainAdapter
 from .zep import ZepBrainAdapter
 
 REGISTRY: dict[str, type[AgentAdapter]] = {
     "unison-agent": UnisonAgentAdapter,
+    "unison-agent-pipeline": UnisonAgentPipelineAdapter,
     "claude-code": ClaudeCodeAdapter,
     "codex": CodexAdapter,
     "gemini-cli": GeminiCliAdapter,
@@ -74,6 +75,7 @@ __all__ = [
     "OpenAIGpt5Adapter",
     "PgvectorNaiveBrainAdapter",
     "UnisonAgentAdapter",
+    "UnisonAgentPipelineAdapter",
     "UnisonBrainAdapter",
     "ZepBrainAdapter",
     "get_adapter",

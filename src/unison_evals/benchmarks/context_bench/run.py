@@ -54,6 +54,50 @@ def _load_rows() -> list[dict]:
     return rows
 
 
+def _git_sha(path: Path) -> str | None:
+    import subprocess
+
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        return None
+
+
+def _submodule_sha(path: Path, sub: str) -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(path), "submodule", "status", sub],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return out.split()[0].lstrip("+-U") if out else None
+    except Exception:
+        return None
+
+
+def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
+    """Reproducibility manifest — pinned to the run so a published number can be
+    reproduced and audited (commit SHAs, models, dataset revision, isolation)."""
+    from datetime import datetime, timezone
+
+    return {
+        "isolation": "per-run ephemeral tenant (ADR-0008)",
+        "evals_commit": _git_sha(_REPO_ROOT),
+        "letta_evals_submodule": _submodule_sha(_REPO_ROOT, "vendor/letta-evals"),
+        "dataset": "vendor/letta-evals/.../filesystem_cloud.jsonl",
+        "agent_model": model,
+        "judge": judge_label,
+        "memory_mode": "fresh",
+        "unison_api_url": os.environ.get("UNISON_API_URL", "http://localhost:3001"),
+        "ephemeral_tenant_id": tenant_id,
+        "run_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def _resolve_args() -> tuple[list[int] | None, str, str]:
     """Resolve CLI flags. Returns task_ids (None means 'run all rows';
     `[]` is rejected upstream as invalid, never used as a sentinel)."""
@@ -170,70 +214,87 @@ def main() -> int:
     results: list[dict] = []
     total_score = 0.0
     total_cost = 0.0
-    for i in task_ids:
-        row = rows[i]
-        question = row["input"]
-        gt = row["ground_truth"]
-        meta = row.get("agent_args", {}).get("extra", {}) or {}
-        print(f"─── Row {i} ({meta.get('question_type', '?')}/{meta.get('difficulty', '?')}) ───")
-        print(f"  Q: {question[:140]}{'…' if len(question) > 140 else ''}")
-        print(f"  GT: {gt}")
 
-        try:
-            ans = target.ask(question)
-        except Exception as e:
-            print(f"  TARGET ERROR: {e}")
-            results.append({"task_id": i, "score": 0.0, "error": str(e)})
-            continue
+    # ADR-0008 per-run isolation: provision one ephemeral tenant + seed the
+    # fixed corpus once. Guaranteed teardown in `finally` so a crash mid-run
+    # never leaks the tenant.
+    try:
+        target.setup()
+    except Exception as e:
+        print(f"ERROR: provision/seed failed: {e}", file=sys.stderr)
+        target.close()
+        return 1
+    ran_tenant_id = target.tenant_id  # capture before close() nulls it
+    print(f"  Tenant:      {ran_tenant_id} (ephemeral, is_eval) — seeded {target.seeded_pages} pages")
+    print()
 
-        print(
-            f"  → {ans.elapsed_s:.1f}s, agent-steps={ans.total_steps}, cost=${ans.total_cost_usd:.4f}"
-        )
-        print(f"  Answer: {ans.answer[:140]}{'…' if len(ans.answer) > 140 else ''}")
+    try:
+        for i in task_ids:
+            row = rows[i]
+            question = row["input"]
+            gt = row["ground_truth"]
+            meta = row.get("agent_args", {}).get("extra", {}) or {}
+            print(
+                f"─── Row {i} ({meta.get('question_type', '?')}/{meta.get('difficulty', '?')}) ───"
+            )
+            print(f"  Q: {question[:140]}{'…' if len(question) > 140 else ''}")
+            print(f"  GT: {gt}")
 
-        # Charge agent spend as soon as the agent has actually run. If the
-        # judge subsequently fails the cost still counts — otherwise
-        # total_agent_cost_usd silently undercounts whenever the judge API
-        # is flaky.
-        total_cost += ans.total_cost_usd
+            try:
+                ans = target.ask(question)
+            except Exception as e:
+                print(f"  TARGET ERROR: {e}")
+                results.append({"task_id": i, "score": 0.0, "error": str(e)})
+                continue
 
-        try:
-            score, raw = judge.grade(question, gt, ans.answer, model=judge_model)
-        except Exception as e:
-            print(f"  JUDGE ERROR: {e}")
+            print(
+                f"  → {ans.elapsed_s:.1f}s, agent-steps={ans.total_steps}, cost=${ans.total_cost_usd:.4f}"
+            )
+            print(f"  Answer: {ans.answer[:140]}{'…' if len(ans.answer) > 140 else ''}")
+
+            # Charge agent spend as soon as the agent has actually run. If the
+            # judge subsequently fails the cost still counts — otherwise
+            # total_agent_cost_usd silently undercounts whenever the judge API
+            # is flaky.
+            total_cost += ans.total_cost_usd
+
+            try:
+                score, raw = judge.grade(question, gt, ans.answer, model=judge_model)
+            except Exception as e:
+                print(f"  JUDGE ERROR: {e}")
+                results.append(
+                    {
+                        "task_id": i,
+                        "score": 0.0,
+                        "agent_answer": ans.answer,
+                        "agent_cost_usd": ans.total_cost_usd,
+                        "error": str(e),
+                    }
+                )
+                continue
+
+            print(f"  Score: {score}  (judge raw: {raw[:60]!r})")
+            total_score += score
             results.append(
                 {
                     "task_id": i,
-                    "score": 0.0,
+                    "question": question,
+                    "ground_truth": gt,
                     "agent_answer": ans.answer,
+                    "score": score,
+                    "judge_raw": raw,
+                    "elapsed_s": ans.elapsed_s,
+                    "agent_steps": ans.total_steps,
                     "agent_cost_usd": ans.total_cost_usd,
-                    "error": str(e),
+                    "question_type": meta.get("question_type"),
+                    "difficulty": meta.get("difficulty"),
                 }
             )
-            continue
-
-        print(f"  Score: {score}  (judge raw: {raw[:60]!r})")
-        total_score += score
-        results.append(
-            {
-                "task_id": i,
-                "question": question,
-                "ground_truth": gt,
-                "agent_answer": ans.answer,
-                "score": score,
-                "judge_raw": raw,
-                "elapsed_s": ans.elapsed_s,
-                "agent_steps": ans.total_steps,
-                "agent_cost_usd": ans.total_cost_usd,
-                "question_type": meta.get("question_type"),
-                "difficulty": meta.get("difficulty"),
-            }
-        )
-        # Persist progress per-row so a crash doesn't waste the whole run.
-        (log_dir / f"row-{i:03d}.json").write_text(json.dumps(results[-1], indent=2))
-        print()
-
-    target.close()
+            # Persist progress per-row so a crash doesn't waste the whole run.
+            (log_dir / f"row-{i:03d}.json").write_text(json.dumps(results[-1], indent=2))
+            print()
+    finally:
+        target.close()
 
     n = len(results)
     pct = (total_score / n * 100) if n else 0.0
@@ -249,16 +310,20 @@ def main() -> int:
         "total_agent_cost_usd": total_cost,
         "task_ids": task_ids,
         "results": results,
+        "manifest": _manifest(model, judge_label, ran_tenant_id),
+        # leaderboard.letta.com, Filesystem suite, as of 2026-03-13. Same dataset,
+        # same gpt-5-mini judge + rubric — only the agent interface differs.
         "comparator_cells": {
-            "letta_agent_sonnet_4_5": 0.740,  # Letta leaderboard, as of submodule pin
-            "letta_agent_gpt_5": 0.7267,
+            "letta_agent_gpt_5_2_codex": 0.93,
+            "letta_agent_gpt_5_4": 0.89,
+            "letta_agent_sonnet_4_6": 0.88,
         },
     }
     (log_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print("─── Summary ──────────────────────────────────────────")
     print(f"  Unison cell ({model}):   {total_score:.1f}/{n} = {pct:.1f}%")
-    print("  Letta cell (Sonnet 4.5): 74.0%  (leaderboard reference)")
-    print(f"  Δ vs Letta:              {pct - 74.0:+.1f}pp")
+    print("  Letta cell (Sonnet 4.6): 88.0%  (leaderboard.letta.com, 2026-03-13)")
+    print(f"  Δ vs Letta Sonnet 4.6:   {pct - 88.0:+.1f}pp  (top model GPT-5.2-codex: 93%)")
     print(f"  Total agent cost:        ${total_cost:.3f}")
     print(f"  Written:                 {log_dir / 'summary.json'}")
     return 0

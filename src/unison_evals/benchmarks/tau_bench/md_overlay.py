@@ -1,21 +1,21 @@
-"""env.data ↔ /wiki/ filesystem codec for τ-bench retail.
+"""env.data ↔ /private/taubench/ filesystem codec for τ-bench retail.
 
 τ-bench env.data is a dict-of-dict:
     { "orders":   {order_id: OrderRecord},
       "users":    {user_id:  UserRecord},
       "products": {product_id: ProductRecord} }
 
-We serialize each record as `/wiki/<table>/<id>.md` with the entire record
+We serialize each record as `/private/taubench/<table>/<id>.md` with the entire record
 embedded as a fenced JSON block (NOT YAML frontmatter — retail records have
 position-sensitive lists and deep-nested objects that YAML round-trips
 unreliably; JSON is unambiguous).
 
 `#` is stripped from order IDs to make valid path slugs:
-    "#W2611340" → "/wiki/orders/W2611340.md"
+    "#W2611340" → "/private/taubench/orders/W2611340.md"
 
 Two extra documents seed alongside the records:
-    /wiki/policy.md   — τ-bench's wiki text (return rules etc.)
-    /wiki/SCHEMA.md   — tells the Unison agent what's where
+    /private/taubench/policy.md   — τ-bench's wiki text (return rules etc.)
+    /private/taubench/SCHEMA.md   — tells the Unison agent what's where
 """
 
 from __future__ import annotations
@@ -29,19 +29,19 @@ from .brain_client import BrainPage
 
 
 def order_path(order_id: str) -> str:
-    return f"/wiki/orders/{order_id.lstrip('#')}.md"
+    return f"/private/taubench/orders/{order_id.lstrip('#')}.md"
 
 
 def user_path(user_id: str) -> str:
-    return f"/wiki/users/{user_id}.md"
+    return f"/private/taubench/users/{user_id}.md"
 
 
 def product_path(product_id: str) -> str:
-    return f"/wiki/products/{product_id}.md"
+    return f"/private/taubench/products/{product_id}.md"
 
 
 def order_id_from_path(path: str) -> str:
-    # /wiki/orders/W2611340.md → "#W2611340"
+    # /private/taubench/orders/W2611340.md → "#W2611340"
     return "#" + path.rsplit("/", 1)[-1].removesuffix(".md")
 
 
@@ -89,9 +89,9 @@ files are persisted and become the source of truth for the store.
 
 ## Layout
 
-- `/wiki/orders/<id>.md`   — one file per order
-- `/wiki/users/<id>.md`    — one file per customer profile
-- `/wiki/products/<id>.md` — product catalogue, each with `variants[]`
+- `/private/taubench/orders/<id>.md`   — one file per order
+- `/private/taubench/users/<id>.md`    — one file per customer profile
+- `/private/taubench/products/<id>.md` — product catalogue, each with `variants[]`
 
 Each file contains a fenced ` ```json ... ``` ` block holding the canonical
 record. The JSON block IS the data; surrounding markdown is ignored. To
@@ -100,7 +100,7 @@ mutate state, overwrite the file with the updated JSON.
 ## File naming
 
 - Order ids in JSON include the `#` prefix (`order_id: "#W2378156"`); the
-  filename strips it: `/wiki/orders/W2378156.md`.
+  filename strips it: `/private/taubench/orders/W2378156.md`.
 - User ids and product ids match the filename exactly.
 
 ## Record shapes
@@ -144,15 +144,15 @@ def build_seed_pages(env_data: dict[str, Any]) -> list[BrainPage]:
     placement, so the policy gets the same authoritative framing both
     modes give it)."""
     pages: list[BrainPage] = [
-        BrainPage(path="/wiki/SCHEMA.md", body_md=SCHEMA_MD, kind="wiki_page"),
+        BrainPage(path="/private/taubench/SCHEMA.md", body_md=SCHEMA_MD, kind="raw"),
     ]
     for order_id, rec in env_data.get("orders", {}).items():
-        pages.append(BrainPage(path=order_path(order_id), body_md=_to_md(rec), kind="wiki_page"))
+        pages.append(BrainPage(path=order_path(order_id), body_md=_to_md(rec), kind="raw"))
     for user_id, rec in env_data.get("users", {}).items():
-        pages.append(BrainPage(path=user_path(user_id), body_md=_to_md(rec), kind="wiki_page"))
+        pages.append(BrainPage(path=user_path(user_id), body_md=_to_md(rec), kind="raw"))
     for product_id, rec in env_data.get("products", {}).items():
         pages.append(
-            BrainPage(path=product_path(product_id), body_md=_to_md(rec), kind="wiki_page")
+            BrainPage(path=product_path(product_id), body_md=_to_md(rec), kind="raw")
         )
     return pages
 
@@ -171,10 +171,10 @@ def parse_snapshot(
             rec = _from_md(body)
         except ValueError:
             continue
-        if path.startswith("/wiki/orders/"):
+        if path.startswith("/private/taubench/orders/"):
             orders[order_id_from_path(path)] = rec
-        elif path.startswith("/wiki/users/"):
+        elif path.startswith("/private/taubench/users/"):
             users[user_id_from_path(path)] = rec
-        elif path.startswith("/wiki/products/"):
+        elif path.startswith("/private/taubench/products/"):
             products[product_id_from_path(path)] = rec
     return {"orders": orders, "users": users, "products": products}

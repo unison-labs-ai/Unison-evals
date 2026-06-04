@@ -61,7 +61,7 @@ def _translate_orders(
         if before_rec == after_rec:
             continue
 
-        path = f"/wiki/orders/{order_id.lstrip('#')}.md"
+        path = f"/private/taubench/orders/{order_id.lstrip('#')}.md"
         status_before = before_rec.get("status")
         status_after = after_rec.get("status")
 
@@ -297,7 +297,7 @@ def _translate_users(
                         },
                     ),
                     reason="user address modified",
-                    source_path=f"/wiki/users/{user_id}.md",
+                    source_path=f"/private/taubench/users/{user_id}.md",
                 )
             )
     return out

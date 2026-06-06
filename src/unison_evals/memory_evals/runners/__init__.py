@@ -1,11 +1,11 @@
 """Runners — drive the eval loop. Each track has its own runner."""
 
+from .agent_e2e import AgentE2ERunner, E2ERunEvent
 from .agent_oracle import AgentOracleRunner, RunEvent
-from .brain_retrieval import BrainRetrievalRunner, BrainRunEvent
 
 __all__ = [
+    "AgentE2ERunner",
     "AgentOracleRunner",
-    "BrainRetrievalRunner",
-    "BrainRunEvent",
+    "E2ERunEvent",
     "RunEvent",
 ]

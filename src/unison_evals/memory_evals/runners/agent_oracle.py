@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import statistics
-import uuid
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime
 from typing import Literal
@@ -18,6 +17,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from ...config import get_settings
+from ...results import new_run_id
 from ...types import (
     JudgeResult,
     Question,
@@ -82,7 +82,7 @@ class AgentOracleRunner:
             raise ValueError("repeat must be >= 1")
         self.systems = systems
         self.judge = judge or LLMJudge()
-        self.run_id = run_id or _new_run_id()
+        self.run_id = run_id or new_run_id("run")
         self.repeat = repeat
         self.settings = get_settings()
         self._results: list[QuestionResult] = []
@@ -367,11 +367,6 @@ def _mean(values: list[int | float]) -> float:
     if not values:
         return 0.0
     return sum(values) / len(values)
-
-
-def _new_run_id() -> str:
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"run-{ts}-{uuid.uuid4().hex[:6]}"
 
 
 def _percentile(values: list[float], p: int) -> float:

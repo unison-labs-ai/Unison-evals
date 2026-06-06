@@ -34,7 +34,6 @@ never calls that method.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime
 from typing import Literal
@@ -43,6 +42,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from ...config import get_settings
+from ...results import new_run_id
 from ...types import (
     BrainQuestion,
     JudgeResult,
@@ -109,7 +109,7 @@ class AgentE2ERunner:
             raise ValueError("AgentE2ERunner needs at least one system")
         self.systems = systems
         self.judge = judge or LLMJudge()
-        self.run_id = run_id or _new_run_id()
+        self.run_id = run_id or new_run_id("run")
         self.settings = get_settings()
         self._results: list[QuestionResult] = []
         self._skipped_systems: list[str] = []
@@ -394,11 +394,6 @@ def _build_efficiency_narrative(
                 f"at {baseline_tokens:,.0f} tokens)"
             )
     return "; ".join(lines) if lines else None
-
-
-def _new_run_id() -> str:
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"run-{ts}-{uuid.uuid4().hex[:6]}"
 
 
 def _percentile(values: list[float], p: int) -> float:

@@ -1,4 +1,5 @@
-"""LLM-as-judge — uses Anthropic Claude to score answers vs. expected.
+"""LLM-as-judge — scores answers vs. expected using OpenAI (gpt-*) OR Anthropic
+(claude-*), routed automatically from the judge model name.
 
 Pinned model + temperature=0 for reproducibility. Returns:
   - score: 0.0 / 0.5 / 1.0
@@ -7,8 +8,9 @@ Pinned model + temperature=0 for reproducibility. Returns:
   - reasoning: short explanation
   - cost_usd: judge call cost
 
-Cost notes: Opus judging ~$0.005/question; Haiku ~$0.0005/question.
-For v0.0 published numbers use Opus; for CI smoke use Haiku.
+The canonical judges are provider-specific: LongMemEval/MemoryAgentBench use
+gpt-4o-2024-08-06 (OpenAI), so the judge MUST be able to call OpenAI — not just
+Anthropic. Provider is inferred from the model prefix.
 """
 
 from __future__ import annotations
@@ -18,26 +20,45 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 from loguru import logger
+from openai import AsyncOpenAI
 
 from ...config import get_settings
 from ...types import JudgeResult
 
-# Pricing (per million tokens) for the judge models we support.
-# Update when Anthropic publishes new prices.
+# Pricing (per million tokens) for the judge models we support. (input, output)
 JUDGE_PRICING: dict[str, tuple[float, float]] = {
-    # claude-opus-4-5
+    # --- Anthropic ---
     "claude-opus-4-5-20250101": (15.0, 75.0),
     "claude-opus-4-5": (15.0, 75.0),
-    # claude-opus-4-7 (latest as of 2026-05)
     "claude-opus-4-7-20260101": (15.0, 75.0),
     "claude-opus-4-7": (15.0, 75.0),
-    # claude-sonnet-4-5/4-6
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
-    # claude-haiku-4-5
     "claude-haiku-4-5-20251001": (0.80, 4.0),
     "claude-haiku-4-5": (0.80, 4.0),
+    # --- OpenAI ---
+    "gpt-4o-2024-08-06": (2.50, 10.0),  # canonical LongMemEval / MemoryAgentBench judge
+    "gpt-4o": (2.50, 10.0),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-5-mini": (0.25, 2.0),
 }
+
+
+def judge_provider(model: str) -> str:
+    """Infer the API provider from a judge model name."""
+    m = model.lower()
+    if m.startswith(("gpt-", "gpt4", "gpt5", "o1", "o3", "o4", "chatgpt")):
+        return "openai"
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith("gemini"):
+        raise ValueError(
+            f"Judge model {model!r} is a Google model — the memory-eval judge only wires "
+            "OpenAI + Anthropic. Use a gpt-* or claude-* judge (e.g. gpt-4o-2024-08-06)."
+        )
+    raise ValueError(
+        f"Cannot infer a provider for judge model {model!r} (expected gpt-* or claude-*)."
+    )
 
 JUDGE_PROMPT = """You are evaluating whether an AI agent's answer correctly answers a question, \
 given the expected answer.
@@ -77,10 +98,9 @@ Respond with ONLY a JSON object on a single line, no markdown:
 
 
 class LLMJudge:
-    """Anthropic-backed answer judge.
-
-    Threshold for `passed`: 1.0 (strict) by default. Lower it (0.5) for
-    partial-credit datasets — pass via `pass_threshold`.
+    """Answer judge backed by OpenAI (gpt-*) or Anthropic (claude-*), selected
+    from the model name. Threshold for `passed`: 1.0 (strict) by default. Lower
+    it (0.5) for partial-credit datasets — pass via `pass_threshold`.
     """
 
     def __init__(
@@ -90,15 +110,49 @@ class LLMJudge:
     ) -> None:
         self.settings = get_settings()
         self.model = model or self.settings.judge_model
+        self.provider = judge_provider(self.model)
         self.pass_threshold = pass_threshold
-        self._client: AsyncAnthropic | None = None
+        self._anthropic: AsyncAnthropic | None = None
+        self._openai: AsyncOpenAI | None = None
 
-    def _get_client(self) -> AsyncAnthropic:
-        if self._client is None:
+    def _anthropic_client(self) -> AsyncAnthropic:
+        if self._anthropic is None:
             if not self.settings.anthropic_api_key:
-                raise RuntimeError("ANTHROPIC_API_KEY not set. Required for the LLM judge.")
-            self._client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
-        return self._client
+                raise RuntimeError("ANTHROPIC_API_KEY not set — required for a claude-* judge.")
+            self._anthropic = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
+        return self._anthropic
+
+    def _openai_client(self) -> AsyncOpenAI:
+        if self._openai is None:
+            if not self.settings.openai_api_key:
+                raise RuntimeError("OPENAI_API_KEY not set — required for a gpt-* judge.")
+            self._openai = AsyncOpenAI(api_key=self.settings.openai_api_key)
+        return self._openai
+
+    async def _call_model(self, prompt: str) -> tuple[str, int, int]:
+        """Call the right provider for self.model. Returns (text, in_tok, out_tok)."""
+        if self.provider == "anthropic":
+            resp = await self._anthropic_client().messages.create(
+                model=self.model,
+                max_tokens=300,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+                timeout=self.settings.judge_timeout,
+            )
+            text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+            return text, resp.usage.input_tokens, resp.usage.output_tokens
+
+        # openai
+        resp = await self._openai_client().chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=300,
+            timeout=self.settings.judge_timeout,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        usage = resp.usage
+        return text, (usage.prompt_tokens if usage else 0), (usage.completion_tokens if usage else 0)
 
     async def judge(
         self,
@@ -116,7 +170,6 @@ class LLMJudge:
                 cost_usd=0.0,
             )
 
-        client = self._get_client()
         prompt = JUDGE_PROMPT.format(
             question=question,
             expected=expected_answer,
@@ -124,13 +177,7 @@ class LLMJudge:
         )
 
         try:
-            response = await client.messages.create(
-                model=self.model,
-                max_tokens=300,
-                temperature=0,
-                messages=[{"role": "user", "content": prompt}],
-                timeout=self.settings.judge_timeout,
-            )
+            text, input_tokens, output_tokens = await self._call_model(prompt)
         except Exception as e:
             logger.warning("Judge call failed: {}", e)
             return JudgeResult(
@@ -142,7 +189,6 @@ class LLMJudge:
                 cost_usd=0.0,
             )
 
-        text = "".join(block.text for block in response.content if hasattr(block, "text")).strip()
         parsed = _parse_judge_json(text)
 
         verdict = str(parsed.get("verdict", "")).upper()
@@ -162,7 +208,7 @@ class LLMJudge:
 
         confidence = float(parsed.get("confidence", 0.5))
         reasoning = str(parsed.get("reasoning", text[:200]))
-        cost = self._compute_cost(response.usage.input_tokens, response.usage.output_tokens)
+        cost = self._compute_cost(input_tokens, output_tokens)
 
         return JudgeResult(
             score=score,
@@ -174,7 +220,10 @@ class LLMJudge:
         )
 
     def _compute_cost(self, input_tokens: int, output_tokens: int) -> float:
-        pricing = JUDGE_PRICING.get(self.model, (15.0, 75.0))  # default to Opus pricing
+        pricing = JUDGE_PRICING.get(self.model)
+        if pricing is None:
+            # Sensible default per provider when a model isn't in the table.
+            pricing = (2.50, 10.0) if self.provider == "openai" else (15.0, 75.0)
         input_price, output_price = pricing
         return (input_tokens * input_price + output_tokens * output_price) / 1_000_000.0
 

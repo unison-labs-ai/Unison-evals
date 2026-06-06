@@ -83,7 +83,7 @@ class UnisonContextBenchTarget:
             },
         )
         seed_resp.raise_for_status()
-        self.seeded_pages = int(seed_resp.json().get("seededDocsCount") or len(docs))
+        self.seeded_pages = int(seed_resp.json().get("seedDocsCount") or len(docs))
 
     def ask(self, question: str) -> TargetAnswer:
         if self.tenant_id is None:

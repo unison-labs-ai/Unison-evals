@@ -57,10 +57,11 @@ async def test_setup_fails_remote_no_jwt(monkeypatch) -> None:
 
     settings = get_settings()
     monkeypatch.setattr(settings, "unison_jwt", "")
+    monkeypatch.setattr(settings, "unison_eval_secret", "")
     monkeypatch.setattr(settings, "unison_api_url", "https://api.eval.unison.ai")
 
     adapter = UnisonAgentAdapter()
-    with pytest.raises(RuntimeError, match="UNISON_JWT not set"):
+    with pytest.raises(RuntimeError, match="Neither UNISON_EVAL_SECRET nor UNISON_JWT"):
         await adapter.setup()
 
 

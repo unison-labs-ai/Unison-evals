@@ -66,7 +66,10 @@ async def test_seed_docs_sent_with_kind_raw(health_mock) -> None:
     assert "oracleContext" not in body
     assert len(body["seedDocs"]) == 2
     for sent_doc, original_doc in zip(body["seedDocs"], docs, strict=True):
-        assert sent_doc["path"] == original_doc.path
+        # The adapter rewrites raw corpus paths (e.g. /sessions/day1.md) into the
+        # writable eval namespace the brain accepts; only the body is verbatim.
+        assert sent_doc["path"].startswith("/private/sources/eval/")
+        assert sent_doc["path"].endswith(".md")
         assert sent_doc["body"] == original_doc.body
         assert sent_doc["kind"] == "raw"  # critical — skips Unison extract pipeline
 

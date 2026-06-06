@@ -13,7 +13,6 @@ from rich.table import Table
 
 from .config import get_settings
 from .memory_evals.adapters import REGISTRY as ADAPTER_REGISTRY
-from .memory_evals.datasets import REGISTRY as DATASET_REGISTRY
 from .memory_evals.datasets import get_dataset
 from .memory_evals.metrics.llm_judge import LLMJudge
 from .memory_evals.runners.agent_e2e import AgentE2ERunner
@@ -21,6 +20,24 @@ from .memory_evals.runners.agent_oracle import AgentOracleRunner
 from .types import RunSummary, SystemSummary
 
 console = Console()
+
+# The one benchmark list + each one's publishable ("real") canonical judge.
+BENCHMARKS = ("longmemeval", "memoryagentbench", "context-bench")
+CANONICAL_JUDGE = {
+    "longmemeval": "gpt-4o-2024-08-06",  # LongMemEval paper judge (>97% human agreement)
+    "memoryagentbench": "gpt-4o-2024-08-06",  # de-facto memory-eval judge
+    "context-bench": "gpt-5-mini",  # Letta-leaderboard parity
+}
+
+
+def _resolve_judge(dataset: str, judge: str | None, real_mode: bool) -> str | None:
+    """--judge wins; else --real → the benchmark's canonical judge; else --dev →
+    the cheap Gemini judge. One rule for all three benchmarks."""
+    if judge:
+        return judge
+    if real_mode:
+        return CANONICAL_JUDGE.get(dataset)
+    return get_settings().dev_judge_model
 
 
 @click.group()
@@ -37,28 +54,36 @@ def list_systems() -> None:
 
 @main.command(name="datasets")
 def list_datasets() -> None:
-    """List registered dataset names."""
-    for name in sorted(DATASET_REGISTRY):
+    """List benchmark names."""
+    for name in BENCHMARKS:
         console.print(f"  {name}")
 
 
 @main.command()
 @click.option(
     "--systems",
-    required=True,
-    help="Comma-separated adapter names (e.g. unison-agent)",
+    default="unison-agent",
+    show_default=True,
+    help="Comma-separated adapter names (memory benches only; context-bench always runs unison-agent).",
 )
-@click.option("--dataset", required=True, type=click.Choice(sorted(DATASET_REGISTRY)))
+@click.option(
+    "--dataset",
+    required=True,
+    type=click.Choice([*BENCHMARKS, "all"]),
+    help="Benchmark to run, or 'all' for the three.",
+)
 @click.option(
     "--track",
-    default="agent-oracle",
+    default="agent-e2e",
     type=click.Choice(["agent-oracle", "agent-e2e"]),
-    help=(
-        "Eval track. agent-oracle=Track 2 (agent given gold context). "
-        "agent-e2e=Track 3 (agent + brain, per-Q corpus ingest)."
-    ),
+    help="Memory-bench track. agent-e2e=Track 3 (agent + brain). agent-oracle=Track 2 (gold context).",
 )
-@click.option("--limit", default=10, show_default=True, type=int, help="Max questions to run.")
+@click.option(
+    "--limit",
+    default=None,
+    type=int,
+    help="Max questions per benchmark. Omit to run the FULL benchmark.",
+)
 @click.option("--judge", default=None, help="Explicit judge model id (overrides --dev/--real).")
 @click.option(
     "--real/--dev",
@@ -90,68 +115,69 @@ def run(
     systems: str,
     dataset: str,
     track: str,
-    limit: int,
+    limit: int | None,
     judge: str | None,
     real_mode: bool,
     pass_threshold: float,
     no_judge: bool,
     output: Path | None,
 ) -> None:
-    """Run an evaluation."""
+    """Run a benchmark (or `--dataset all`) on the unison-agent. One command,
+    one --limit, the prod model (no model is sent — the server decides)."""
     sys_list = [s.strip() for s in systems.split(",") if s.strip()]
     if not sys_list:
         raise click.UsageError("--systems cannot be empty")
-
     for s in sys_list:
         if s not in ADAPTER_REGISTRY:
             raise click.BadParameter(
                 f"Unknown system '{s}'. Run `unison-evals systems` to list registered names."
             )
 
-    if track == "agent-e2e" and no_judge:
-        raise click.UsageError("--no-judge is not supported with --track agent-e2e")
+    datasets = list(BENCHMARKS) if dataset == "all" else [dataset]
+    mode = "REAL (canonical, publishable)" if (real_mode or judge) else "DEV (cheap Gemini)"
+    for ds in datasets:
+        if len(datasets) > 1:
+            click.echo(f"\n=== {ds} ===")
 
-    # Judge selection:
-    #   --judge X       explicit override, always wins
-    #   --real          per-benchmark canonical judge → publishable, leaderboard-comparable
-    #   --dev (default) cheap Gemini judge (dev_judge_model) → test / tune / research loops
-    # The canonical judges are the paper/leaderboard ones; Context-Bench is scored
-    # by its own runner (gpt-5-mini real / Gemini dev) and is unaffected by this.
-    from .config import get_settings
+        # Context-Bench has its own per-run runner (fixed corpus, Letta rubric).
+        # It always judges; reuse the same judge-resolution rule.
+        if ds == "context-bench":
+            from .benchmarks.context_bench.run import run_context_bench
 
-    CANONICAL_JUDGE = {
-        "longmemeval": "gpt-4o-2024-08-06",  # LongMemEval paper judge (>97% human agreement)
-        "memoryagentbench": "gpt-4o-2024-08-06",  # de-facto memory-eval judge
-    }
-    if judge:
-        resolved_judge = judge
-    elif real_mode:
-        resolved_judge = CANONICAL_JUDGE.get(dataset)
-    else:
-        resolved_judge = get_settings().dev_judge_model
-    if not no_judge:
-        mode = "REAL (canonical, publishable)" if (real_mode or judge) else "DEV (cheap Gemini)"
-        click.echo(f"  Judge: {resolved_judge or '(env / config default)'}  [{mode}]")
+            cb_judge = _resolve_judge(ds, judge, real_mode) or CANONICAL_JUDGE["context-bench"]
+            click.echo(f"  Judge: {cb_judge}  [{mode}]")
+            run_context_bench(
+                limit=limit,
+                judge_model=cb_judge,
+                agent_model=get_settings().unison_agent_model or None,
+            )
+            continue
 
-    asyncio.run(
-        _run_async(
-            systems=sys_list,
-            dataset=dataset,
-            track=track,
-            limit=limit,
-            judge_model=resolved_judge,
-            pass_threshold=pass_threshold,
-            no_judge=no_judge,
-            output=output,
+        # Memory benches (LongMemEval, MemoryAgentBench).
+        if track == "agent-e2e" and no_judge:
+            raise click.UsageError("--no-judge is not supported with --track agent-e2e")
+        resolved_judge = None if no_judge else _resolve_judge(ds, judge, real_mode)
+        if not no_judge:
+            click.echo(f"  Judge: {resolved_judge or '(env / config default)'}  [{mode}]")
+        asyncio.run(
+            _run_async(
+                systems=sys_list,
+                dataset=ds,
+                track=track,
+                limit=limit,
+                judge_model=resolved_judge,
+                pass_threshold=pass_threshold,
+                no_judge=no_judge,
+                output=output,
+            )
         )
-    )
 
 
 async def _run_async(
     systems: list[str],
     dataset: str,
     track: str,
-    limit: int,
+    limit: int | None,
     judge_model: str | None,
     pass_threshold: float,
     no_judge: bool,
@@ -181,7 +207,7 @@ async def _run_async(
 async def _run_agent_oracle(
     systems: list[str],
     dataset: str,
-    limit: int,
+    limit: int | None,
     judge_model: str | None,
     pass_threshold: float,
     no_judge: bool,
@@ -239,7 +265,7 @@ async def _run_agent_oracle(
 async def _run_agent_e2e(
     systems: list[str],
     dataset: str,
-    limit: int,
+    limit: int | None,
     judge_model: str | None,
     pass_threshold: float,
     output: Path | None,

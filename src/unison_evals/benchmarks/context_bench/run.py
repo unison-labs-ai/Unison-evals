@@ -128,7 +128,8 @@ def _resolve_args() -> tuple[list[int] | None, str, str]:
         "--judge-model",
         type=str,
         default=None,
-        help="LLM-judge model. Default: $JUDGE_MODEL or gpt-5-mini (Letta's leaderboard default).",
+        help="LLM-judge model. Default: gpt-5-mini (Letta's leaderboard default; "
+        "$JUDGE_MODEL is deliberately NOT honoured here to keep parity).",
     )
     a = p.parse_args()
 

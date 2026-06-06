@@ -144,13 +144,24 @@ def run(
     if track == "agent-e2e" and no_judge:
         raise click.UsageError("--no-judge is not supported with --track agent-e2e")
 
+    # Per-benchmark canonical judge → publishable, leaderboard-comparable scores.
+    # An explicit --judge (or JUDGE_MODEL env) overrides. Context-Bench is scored
+    # by its own runner (gpt-5-mini, Letta-leaderboard parity) and is unaffected.
+    CANONICAL_JUDGE = {
+        "longmemeval": "gpt-4o-2024-08-06",  # LongMemEval paper judge (>97% human agreement)
+        "memoryagentbench": "gpt-4o-2024-08-06",  # de-facto memory-eval judge; documented choice
+    }
+    resolved_judge = judge or CANONICAL_JUDGE.get(dataset)
+    if not no_judge:
+        click.echo(f"  Judge: {resolved_judge or '(JUDGE_MODEL env / config default)'}")
+
     asyncio.run(
         _run_async(
             systems=sys_list,
             dataset=dataset,
             track=track,
             limit=limit,
-            judge_model=judge,
+            judge_model=resolved_judge,
             pass_threshold=pass_threshold,
             no_judge=no_judge,
             corpus=corpus,

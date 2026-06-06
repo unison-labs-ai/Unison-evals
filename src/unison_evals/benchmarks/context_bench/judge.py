@@ -159,6 +159,30 @@ def _grade_anthropic(prompt: str, model: str) -> dict:
     return {}
 
 
+def _grade_google(prompt: str, model: str) -> dict:
+    from google import genai
+    from google.genai import types as genai_types
+
+    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    resp = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            temperature=_coerce_temperature(model, 0.0),
+            response_mime_type="application/json",
+            response_schema={
+                "type": "object",
+                "properties": {
+                    "score": {"type": "number"},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["score", "rationale"],
+            },
+        ),
+    )
+    return json.loads(resp.text or "{}")
+
+
 def grade(
     question: str,
     ground_truth: str,
@@ -179,6 +203,8 @@ def grade(
         parsed = _grade_openai(prompt, judge_model)
     elif provider == "anthropic":
         parsed = _grade_anthropic(prompt, judge_model)
+    elif provider == "google":
+        parsed = _grade_google(prompt, judge_model)
     else:
         raise ValueError(f"Judge provider {provider!r} not yet wired (model={judge_model!r}).")
 

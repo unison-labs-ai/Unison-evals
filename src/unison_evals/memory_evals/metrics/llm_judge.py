@@ -41,6 +41,10 @@ JUDGE_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.0),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-5-mini": (0.25, 2.0),
+    # --- Google (dev/research judge — cheap, on Gemini credits) ---
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-pro": (1.25, 10.0),
 }
 
 
@@ -52,12 +56,10 @@ def judge_provider(model: str) -> str:
     if m.startswith("claude"):
         return "anthropic"
     if m.startswith("gemini"):
-        raise ValueError(
-            f"Judge model {model!r} is a Google model — the memory-eval judge only wires "
-            "OpenAI + Anthropic. Use a gpt-* or claude-* judge (e.g. gpt-4o-2024-08-06)."
-        )
+        return "google"
     raise ValueError(
-        f"Cannot infer a provider for judge model {model!r} (expected gpt-* or claude-*)."
+        f"Cannot infer a provider for judge model {model!r} "
+        "(expected gpt-*, claude-*, or gemini-*)."
     )
 
 JUDGE_PROMPT = """You are evaluating whether an AI agent's answer correctly answers a question, \
@@ -114,6 +116,16 @@ class LLMJudge:
         self.pass_threshold = pass_threshold
         self._anthropic: AsyncAnthropic | None = None
         self._openai: AsyncOpenAI | None = None
+        self._google: object | None = None  # google.genai.Client (lazy)
+
+    def _google_client(self) -> object:
+        if self._google is None:
+            if not self.settings.google_api_key:
+                raise RuntimeError("GOOGLE_API_KEY not set — required for a gemini-* judge.")
+            from google import genai
+
+            self._google = genai.Client(api_key=self.settings.google_api_key)
+        return self._google
 
     def _anthropic_client(self) -> AsyncAnthropic:
         if self._anthropic is None:
@@ -131,6 +143,20 @@ class LLMJudge:
 
     async def _call_model(self, prompt: str) -> tuple[str, int, int]:
         """Call the right provider for self.model. Returns (text, in_tok, out_tok)."""
+        if self.provider == "google":
+            from google.genai import types as genai_types
+
+            resp = await self._google_client().aio.models.generate_content(  # type: ignore[attr-defined]
+                model=self.model,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(max_output_tokens=300, temperature=0),
+            )
+            text = (resp.text or "").strip()
+            usage = resp.usage_metadata
+            in_tok = int(getattr(usage, "prompt_token_count", 0) or 0)
+            out_tok = int(getattr(usage, "candidates_token_count", 0) or 0)
+            return text, in_tok, out_tok
+
         if self.provider == "anthropic":
             resp = await self._anthropic_client().messages.create(
                 model=self.model,

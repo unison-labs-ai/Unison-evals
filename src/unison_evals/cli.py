@@ -64,7 +64,15 @@ def list_datasets() -> None:
     ),
 )
 @click.option("--limit", default=10, show_default=True, type=int, help="Max questions to run.")
-@click.option("--judge", default=None, help="Judge model id. Defaults to JUDGE_MODEL env var.")
+@click.option("--judge", default=None, help="Explicit judge model id (overrides --dev/--real).")
+@click.option(
+    "--real/--dev",
+    "real_mode",
+    default=False,
+    show_default=True,
+    help="--real: the per-benchmark canonical judge (publishable, leaderboard-comparable). "
+    "--dev (default): the cheap Gemini judge (dev_judge_model) for test/tune/research loops.",
+)
 @click.option(
     "--pass-threshold",
     default=1.0,
@@ -110,6 +118,7 @@ def run(
     track: str,
     limit: int,
     judge: str | None,
+    real_mode: bool,
     pass_threshold: float,
     no_judge: bool,
     corpus: str | None,
@@ -144,16 +153,27 @@ def run(
     if track == "agent-e2e" and no_judge:
         raise click.UsageError("--no-judge is not supported with --track agent-e2e")
 
-    # Per-benchmark canonical judge → publishable, leaderboard-comparable scores.
-    # An explicit --judge (or JUDGE_MODEL env) overrides. Context-Bench is scored
-    # by its own runner (gpt-5-mini, Letta-leaderboard parity) and is unaffected.
+    # Judge selection:
+    #   --judge X       explicit override, always wins
+    #   --real          per-benchmark canonical judge → publishable, leaderboard-comparable
+    #   --dev (default) cheap Gemini judge (dev_judge_model) → test / tune / research loops
+    # The canonical judges are the paper/leaderboard ones; Context-Bench is scored
+    # by its own runner (gpt-5-mini real / Gemini dev) and is unaffected by this.
+    from .config import get_settings
+
     CANONICAL_JUDGE = {
         "longmemeval": "gpt-4o-2024-08-06",  # LongMemEval paper judge (>97% human agreement)
-        "memoryagentbench": "gpt-4o-2024-08-06",  # de-facto memory-eval judge; documented choice
+        "memoryagentbench": "gpt-4o-2024-08-06",  # de-facto memory-eval judge
     }
-    resolved_judge = judge or CANONICAL_JUDGE.get(dataset)
+    if judge:
+        resolved_judge = judge
+    elif real_mode:
+        resolved_judge = CANONICAL_JUDGE.get(dataset)
+    else:
+        resolved_judge = get_settings().dev_judge_model
     if not no_judge:
-        click.echo(f"  Judge: {resolved_judge or '(JUDGE_MODEL env / config default)'}")
+        mode = "REAL (canonical, publishable)" if (real_mode or judge) else "DEV (cheap Gemini)"
+        click.echo(f"  Judge: {resolved_judge or '(env / config default)'}  [{mode}]")
 
     asyncio.run(
         _run_async(

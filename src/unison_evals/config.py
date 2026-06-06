@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # Models
     judge_model: str = "claude-opus-4-5-20250101"
     default_agent_model: str = "claude-sonnet-4-5"
+    # Dev/research judge (cheap, on Gemini credits). Used by --dev runs in place
+    # of the per-benchmark canonical judge. gemini-2.5-flash: smart enough to
+    # track the real judge, ~$0.0007/call (≈ half of gpt-4o, ~4× of flash-lite).
+    dev_judge_model: str = "gemini-2.5-flash"
 
     # Timeouts (seconds)
     adapter_timeout: int = 120

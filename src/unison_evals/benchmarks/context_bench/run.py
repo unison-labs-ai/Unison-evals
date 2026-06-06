@@ -128,18 +128,36 @@ def _resolve_args() -> tuple[list[int] | None, str, str]:
         "--judge-model",
         type=str,
         default=None,
-        help="LLM-judge model. Default: gpt-5-mini (Letta's leaderboard default; "
-        "$JUDGE_MODEL is deliberately NOT honoured here to keep parity).",
+        help="Explicit LLM-judge model (overrides --dev/--real).",
+    )
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--real",
+        action="store_true",
+        help="Real judge: gpt-5-mini (Letta-leaderboard parity, publishable).",
+    )
+    mode.add_argument(
+        "--dev",
+        action="store_true",
+        help="Dev judge: cheap Gemini (dev_judge_model), for test/tune/research loops. DEFAULT.",
     )
     a = p.parse_args()
 
     model = a.model or os.environ.get("TAUBENCH_AGENT_MODEL") or "claude-sonnet-4-5"
-    # Judge model: CLI flag > leaderboard default. We deliberately do NOT
-    # honour $JUDGE_MODEL here — it's a holdover from the memory-evals
-    # harness and silently breaks the apples-to-apples comparison with
-    # Letta's leaderboard cell. Set --judge-model on the CLI if you really
-    # want to swap it.
-    judge_model = a.judge_model or judge.DEFAULT_JUDGE_MODEL
+    # Judge model:
+    #   --judge-model X  explicit override, always wins
+    #   --real           gpt-5-mini (Letta-leaderboard parity, publishable)
+    #   --dev (default)  cheap Gemini judge for test/tune/research loops
+    # $JUDGE_MODEL is deliberately NOT honoured here — it's a memory-evals
+    # holdover that silently breaks Letta apples-to-apples comparison.
+    from ...config import get_settings
+
+    if a.judge_model:
+        judge_model = a.judge_model
+    elif a.real:
+        judge_model = judge.DEFAULT_JUDGE_MODEL
+    else:
+        judge_model = get_settings().dev_judge_model
 
     # task_ids resolution. Sentinel for "run all rows" is `None` (filled
     # after dataset load), never an empty list. -n must be >= 1; explicit

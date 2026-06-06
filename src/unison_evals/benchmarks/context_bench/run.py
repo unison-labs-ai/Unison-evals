@@ -25,6 +25,8 @@ load_dotenv(_REPO_ROOT / ".env")
 
 from . import judge  # noqa: E402
 from .target import UnisonContextBenchTarget  # noqa: E402
+from ...config import get_settings  # noqa: E402
+from ...results import new_run_id, results_path  # noqa: E402
 
 DATASET_PATH = (
     _REPO_ROOT
@@ -114,8 +116,10 @@ def run_context_bench(
     task_ids = list(range(n_rows))
 
     model_label = agent_model or "auto-prod"
-    log_dir = _REPO_ROOT / "results" / "context-bench" / "unison" / model_label.replace("/", "_")
-    log_dir.mkdir(parents=True, exist_ok=True)
+    run_id = new_run_id("context-bench")
+    out_path = results_path(run_id)
+    rows_dir = get_settings().results_dir / f"{run_id}.rows"  # per-row crash recovery
+    rows_dir.mkdir(parents=True, exist_ok=True)
 
     target = UnisonContextBenchTarget(model=agent_model)
     judge_provider = judge.derive_provider(judge_model)
@@ -132,7 +136,7 @@ def run_context_bench(
     print(f"  Agent model: {model_label}")
     print(f"  Judge model: {judge_label}")
     print(f"  Tasks:       {len(task_ids)} row(s) (idx {task_ids[0]}..{task_ids[-1]})")
-    print(f"  Log dir:     {log_dir}")
+    print(f"  Output:      {out_path}")
     print()
 
     results: list[dict] = []
@@ -214,7 +218,7 @@ def run_context_bench(
                 }
             )
             # Persist progress per-row so a crash doesn't waste the whole run.
-            (log_dir / f"row-{i:03d}.json").write_text(json.dumps(results[-1], indent=2))
+            (rows_dir / f"row-{i:03d}.json").write_text(json.dumps(results[-1], indent=2))
             print()
     finally:
         target.close()
@@ -222,7 +226,8 @@ def run_context_bench(
     n = len(results)
     pct = (total_score / n * 100) if n else 0.0
     summary = {
-        "benchmark": "context-bench-filesystem",
+        "benchmark": "context-bench",
+        "run_id": run_id,
         "cell": "unison-bash-md",
         "agent_model": model_label,
         "judge_model": judge_model,
@@ -242,11 +247,11 @@ def run_context_bench(
             "letta_agent_sonnet_4_6": 0.88,
         },
     }
-    (log_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    out_path.write_text(json.dumps(summary, indent=2))
     print("─── Summary ──────────────────────────────────────────")
     print(f"  Unison cell ({model_label}):   {total_score:.1f}/{n} = {pct:.1f}%")
     print("  Letta cell (Sonnet 4.6): 88.0%  (leaderboard.letta.com, 2026-03-13)")
     print(f"  Δ vs Letta Sonnet 4.6:   {pct - 88.0:+.1f}pp  (top model GPT-5.2-codex: 93%)")
     print(f"  Total agent cost:        ${total_cost:.3f}")
-    print(f"  Written:                 {log_dir / 'summary.json'}")
+    print(f"  Written:                 {out_path}")
     return summary

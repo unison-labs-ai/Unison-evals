@@ -17,6 +17,7 @@ from .memory_evals.datasets import get_dataset
 from .memory_evals.metrics.llm_judge import LLMJudge
 from .memory_evals.runners.agent_e2e import AgentE2ERunner
 from .memory_evals.runners.agent_oracle import AgentOracleRunner
+from .results import new_run_id, results_path
 from .types import RunSummary, SystemSummary
 
 console = Console()
@@ -143,6 +144,7 @@ def run(
             "Each benchmark already writes to results/ automatically."
         )
     mode = "REAL (canonical, publishable)" if (real_mode or judge) else "DEV (cheap Gemini)"
+    headlines: list[dict] = []
     for ds in datasets:
         if len(datasets) > 1:
             click.echo(f"\n=== {ds} ===")
@@ -154,10 +156,13 @@ def run(
 
             cb_judge = _resolve_judge(ds, judge, real_mode) or CANONICAL_JUDGE["context-bench"]
             click.echo(f"  Judge: {cb_judge}  [{mode}]")
-            run_context_bench(
+            cb = run_context_bench(
                 limit=limit,
                 judge_model=cb_judge,
                 agent_model=get_settings().unison_agent_model or None,
+            )
+            headlines.append(
+                {"benchmark": ds, "n": cb["n"], "pct": cb["pct"], "cost_usd": cb["total_agent_cost_usd"]}
             )
             continue
 
@@ -167,7 +172,7 @@ def run(
         resolved_judge = None if no_judge else _resolve_judge(ds, judge, real_mode)
         if not no_judge:
             click.echo(f"  Judge: {resolved_judge or '(env / config default)'}  [{mode}]")
-        asyncio.run(
+        hl = asyncio.run(
             _run_async(
                 systems=sys_list,
                 dataset=ds,
@@ -179,6 +184,11 @@ def run(
                 output=output,
             )
         )
+        if hl:
+            headlines.append(hl)
+
+    if len(datasets) > 1 and headlines:
+        _print_combined(headlines)
 
 
 async def _run_async(
@@ -190,9 +200,9 @@ async def _run_async(
     pass_threshold: float,
     no_judge: bool,
     output: Path | None,
-) -> None:
+) -> dict | None:
     if track == "agent-e2e":
-        await _run_agent_e2e(
+        return await _run_agent_e2e(
             systems=systems,
             dataset=dataset,
             limit=limit,
@@ -200,16 +210,15 @@ async def _run_async(
             pass_threshold=pass_threshold,
             output=output,
         )
-    else:
-        await _run_agent_oracle(
-            systems=systems,
-            dataset=dataset,
-            limit=limit,
-            judge_model=judge_model,
-            pass_threshold=pass_threshold,
-            no_judge=no_judge,
-            output=output,
-        )
+    return await _run_agent_oracle(
+        systems=systems,
+        dataset=dataset,
+        limit=limit,
+        judge_model=judge_model,
+        pass_threshold=pass_threshold,
+        no_judge=no_judge,
+        output=output,
+    )
 
 
 async def _run_agent_oracle(
@@ -220,20 +229,20 @@ async def _run_agent_oracle(
     pass_threshold: float,
     no_judge: bool,
     output: Path | None,
-) -> None:
+) -> dict | None:
     settings = get_settings()
     ds = get_dataset(dataset)
     questions = list(ds.load(limit=limit))
     if not questions:
         console.print("[red]Dataset returned 0 questions.[/red]")
-        return
+        return None
 
     judge_obj = (
         _NoOpJudge(judge_model or settings.judge_model)
         if no_judge
         else LLMJudge(model=judge_model, pass_threshold=pass_threshold)
     )
-    runner = AgentOracleRunner(systems=systems, judge=judge_obj)
+    runner = AgentOracleRunner(systems=systems, judge=judge_obj, run_id=new_run_id(dataset))
 
     console.print(
         f"[bold]Run {runner.run_id}[/bold] · "
@@ -260,14 +269,9 @@ async def _run_agent_oracle(
 
     if summary is None:
         console.print("[red]Run did not complete.[/red]")
-        return
+        return None
 
-    _print_summary_table(summary)
-
-    out_path = output or settings.results_dir / f"{summary.run_id}.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(_to_json(summary, runner.results))
-    console.print(f"\n[dim]→ {out_path}[/dim]")
+    return _finalize(dataset, summary, runner.results, output)
 
 
 async def _run_agent_e2e(
@@ -277,25 +281,24 @@ async def _run_agent_e2e(
     judge_model: str | None,
     pass_threshold: float,
     output: Path | None,
-) -> None:
+) -> dict | None:
     """Track 3 (agent E2E) — per-question corpus ingest via seed_docs, then judge."""
-    settings = get_settings()
     ds = get_dataset(dataset)
     try:
         brain_questions = list(ds.load_brain_questions(limit=limit))
     except NotImplementedError as e:
         console.print(f"[red]Track 3 unavailable for dataset={dataset}: {e}[/red]")
-        return
+        return None
 
     if not brain_questions:
         console.print(
             "[red]Dataset returned 0 brain questions — cannot run agent-e2e track for "
             f"dataset={dataset}.[/red]"
         )
-        return
+        return None
 
     judge_obj = LLMJudge(model=judge_model, pass_threshold=pass_threshold)
-    runner = AgentE2ERunner(systems=systems, judge=judge_obj)
+    runner = AgentE2ERunner(systems=systems, judge=judge_obj, run_id=new_run_id(dataset))
 
     console.print(
         f"[bold]Run {runner.run_id}[/bold] · "
@@ -326,14 +329,42 @@ async def _run_agent_e2e(
 
     if summary is None:
         console.print("[red]Run did not complete.[/red]")
-        return
+        return None
 
+    return _finalize(dataset, summary, runner.results, output)
+
+
+def _finalize(dataset: str, summary: RunSummary, results: list, output: Path | None) -> dict:
+    """Print the table, write results/<run_id>.json, return the headline."""
     _print_summary_table(summary)
-
-    out_path = output or settings.results_dir / f"{runner.run_id}.json"
+    out_path = output or results_path(summary.run_id)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(_to_json(summary, runner.results))
+    out_path.write_text(_to_json(summary, results))
     console.print(f"\n[dim]→ {out_path}[/dim]")
+    return _headline(dataset, summary)
+
+
+def _headline(dataset: str, summary: RunSummary) -> dict:
+    """One-line score for the combined --dataset all summary."""
+    s0 = summary.summaries[0] if summary.summaries else None
+    pct = (s0.pass_rate * 100) if s0 else 0.0
+    cost = (s0.cost_per_question_usd * s0.n_questions) if s0 else 0.0
+    return {"benchmark": dataset, "n": summary.n_questions, "pct": pct, "cost_usd": cost}
+
+
+def _print_combined(headlines: list[dict]) -> None:
+    """Aggregate table printed once at the end of a `--dataset all` run."""
+    table = Table(title="\nAll benchmarks")
+    table.add_column("Benchmark")
+    table.add_column("N", justify="right")
+    table.add_column("Score %", justify="right")
+    table.add_column("Agent $", justify="right")
+    total = 0.0
+    for h in headlines:
+        table.add_row(h["benchmark"], str(h["n"]), f"{h['pct']:.1f}%", f"${h['cost_usd']:.3f}")
+        total += h["cost_usd"]
+    console.print(table)
+    console.print(f"[dim]Total agent cost: ${total:.3f}  (vs each benchmark's published number)[/dim]")
 
 
 def _print_summary_table(summary: RunSummary) -> None:

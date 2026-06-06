@@ -24,45 +24,17 @@ class Settings(BaseSettings):
     # run reproducible, isolated benchmarks against the deployed (prod) app.
     unison_eval_secret: str = ""
 
-    # Anthropic (judge + claude-code adapter cost accounting)
+    # Anthropic (judge cost accounting)
     anthropic_api_key: str = ""
 
-    # OpenAI (pgvector_naive embeddings; optional GPT judge)
+    # OpenAI (real judge: gpt-4o-2024-08-06 + Context-Bench gpt-5-mini)
     openai_api_key: str = ""
-    openai_embedding_model: str = "text-embedding-3-small"
-    openai_embedding_dim: int = 1536  # text-embedding-3-small native dim
 
-    # Mem0 cloud
-    mem0_api_key: str = ""
-
-    # Letta cloud / self-hosted
-    letta_api_key: str = ""
-    letta_base_url: str = ""  # leave empty for Letta cloud
-    letta_agent_model: str = "openai/gpt-4o-mini"
-    letta_agent_embedding: str = "openai/text-embedding-3-small"
-
-    # Zep cloud (or self-hosted via zep_base_url)
-    zep_api_key: str = ""
-    zep_base_url: str = ""  # blank = Zep cloud (api.getzep.com)
-    zep_ingest_wait_seconds: float = 10.0  # wait for async graph build after ingest
-
-    # pgvector_naive — local Postgres DSN with pgvector extension
-    pgvector_dsn: str = "postgres://postgres:evals@localhost:5433/postgres"
-
-    # Google Gemini
+    # Google (dev/research judge: gemini-* — the default --dev judge)
     google_api_key: str = ""
-    gemini_model: str = "gemini-2.5-pro"
-
-    # OpenAI chat (separate from embeddings / pgvector_naive)
-    openai_chat_model: str = "gpt-5"
 
     # Models
     judge_model: str = "claude-opus-4-5-20250101"
-    # Generation model for the non-Unison COMPARATOR baselines only
-    # (anthropic-raw = bare LLM, mem0 = competitor) — they call a provider
-    # directly, so they need a concrete model. NOTHING to do with the Unison
-    # agent (which runs the server's prod model) or the judge.
-    baseline_agent_model: str = "claude-sonnet-4-5"
     # Unison SUT model override. EMPTY (default) = submit the task with NO model,
     # so the SERVER runs its production model path (auto → gemini-3-flash-preview
     # + escalation to gpt-5.4-mini / gemini-3.1-pro) exactly like a live user

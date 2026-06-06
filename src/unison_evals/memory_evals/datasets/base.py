@@ -19,7 +19,6 @@ class Dataset(ABC):
         name           — short identifier used in the registry
         description    — one-line human description shown in the UI
         total_questions— total Q count in the canonical split; None if unbounded
-                         (e.g. msmarco scale corpus is queried, not enumerated)
         supported_tracks— which tracks this dataset has data for. Determines
                          which radio options the UI enables.
     """

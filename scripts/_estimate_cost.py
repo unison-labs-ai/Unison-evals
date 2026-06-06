@@ -4,13 +4,11 @@
 Called by run_comprehensive.sh to gate runs > $20.
 
 Usage:
-    python scripts/_estimate_cost.py --limit 20 --judge claude-haiku-4-5 \\
-        --tracks brain agent together --datasets bitempoqa longmemeval \\
-        --systems unison-brain pgvector-naive mem0 letta zep \\
-                  unison-agent claude-code codex gemini-cli mem0-agent \\
-                  anthropic-raw openai-gpt5 google-gemini
+    python scripts/_estimate_cost.py --limit 20 --judge gpt-4o-2024-08-06 \\
+        --tracks agent together --datasets longmemeval memoryagentbench \\
+        --agent-systems unison-agent unison-agent-pipeline
 
-Exit code 1 if total > $20 and --check flag is set (used by the shell gate).
+Exit code 1 if total > $20 and --check flag is set (used by the shell budget gate).
 """
 
 from __future__ import annotations
@@ -24,29 +22,15 @@ import sys
 # Judge cost is separate and added on top for agent tracks.
 # ---------------------------------------------------------------------------
 
-BRAIN_COST_PER_Q: dict[str, float] = {
-    "unison-brain": 0.001,       # tRPC call, no LLM
-    "pgvector-naive": 0.001,     # embeddings only (text-embedding-3-small ~$0.00002/token)
-    "mem0": 0.50,                # cloud per-op pricing
-    "letta": 0.25,               # cloud API per call
-    "zep": 0.50,                 # cloud per-op pricing
-}
-
 AGENT_COST_PER_Q: dict[str, float] = {
     "unison-agent": 0.033,
-    "claude-code": 0.033,
-    "codex": 0.033,
-    "gemini-cli": 0.010,
-    "mem0-agent": 0.033,
-    "anthropic-raw": 0.033,
-    "openai-gpt5": 0.050,
-    "google-gemini": 0.010,
+    "unison-agent-pipeline": 0.033,
 }
 
 # Together track (E2E) = brain ingest + agent call
 TOGETHER_COST_PER_Q: dict[str, float] = {
     s: AGENT_COST_PER_Q.get(s, 0.05) + 0.001
-    for s in list(AGENT_COST_PER_Q) + ["unison-agent"]
+    for s in AGENT_COST_PER_Q
 }
 
 JUDGE_COST_PER_Q: dict[str, float] = {
@@ -55,6 +39,7 @@ JUDGE_COST_PER_Q: dict[str, float] = {
     "claude-opus-4-5-20250101": 0.015,
     "claude-opus-4-0": 0.015,
     "claude-sonnet-4-5": 0.003,
+    "gpt-4o-2024-08-06": 0.005,
 }
 _DEFAULT_JUDGE_COST = 0.003  # fallback for unknown judge
 
@@ -66,10 +51,7 @@ def cost_for_combo(
     judge: str,
 ) -> float:
     """Return estimated USD cost for one (track, dataset, system) combo at `limit` questions."""
-    if track == "brain":
-        per_q = BRAIN_COST_PER_Q.get(system, 0.10)
-        judge_per_q = 0.0  # no judge in brain track
-    elif track == "agent":
+    if track == "agent":
         per_q = AGENT_COST_PER_Q.get(system, 0.033)
         judge_per_q = JUDGE_COST_PER_Q.get(judge, _DEFAULT_JUDGE_COST)
     else:  # together / E2E
@@ -82,55 +64,27 @@ def cost_for_combo(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Estimate comprehensive run cost.")
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--judge", default="claude-haiku-4-5")
-    parser.add_argument("--tracks", nargs="+", default=["brain", "agent", "together"])
+    parser.add_argument("--judge", default="gpt-4o-2024-08-06")
+    parser.add_argument("--tracks", nargs="+", default=["agent", "together"])
     parser.add_argument("--datasets", nargs="+", default=[
-        "bitempoqa", "longmemeval", "memoryagentbench", "musique", "frames", "msmarco"
-    ])
-    parser.add_argument("--brain-systems", nargs="+", dest="brain_systems", default=[
-        "unison-brain", "pgvector-naive", "mem0", "letta", "zep"
+        "longmemeval", "memoryagentbench"
     ])
     parser.add_argument("--agent-systems", nargs="+", dest="agent_systems", default=[
-        "unison-agent", "claude-code", "codex", "gemini-cli", "mem0-agent",
-        "anthropic-raw", "openai-gpt5", "google-gemini"
+        "unison-agent", "unison-agent-pipeline"
     ])
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit 1 if total > $20 (used by the shell budget gate).",
+        help="Exit 1 if total > threshold (used by the shell budget gate).",
     )
     parser.add_argument("--threshold", type=float, default=20.0)
     args = parser.parse_args()
 
-    # Datasets per track (not all datasets work with all tracks).
-    # brain-track datasets:  bitempoqa, longmemeval, memoryagentbench, msmarco
-    # agent-track datasets:  bitempoqa, longmemeval, memoryagentbench, musique, frames
-    # together-track datasets: bitempoqa, longmemeval, musique, frames
-    brain_datasets = [
-        d for d in args.datasets
-        if d in {"bitempoqa", "longmemeval", "memoryagentbench", "msmarco", "musique"}
-    ]
-    agent_datasets = [
-        d for d in args.datasets
-        if d in {"bitempoqa", "longmemeval", "memoryagentbench", "musique", "frames"}
-    ]
-    together_datasets = [
-        d for d in args.datasets
-        if d in {"bitempoqa", "longmemeval", "musique", "frames"}
-    ]
-
     rows: list[tuple[str, str, str, float]] = []
 
     for track in args.tracks:
-        if track == "brain":
-            ds_list = brain_datasets
-            sys_list = args.brain_systems
-        elif track == "agent":
-            ds_list = agent_datasets
-            sys_list = args.agent_systems
-        else:
-            ds_list = together_datasets
-            sys_list = args.agent_systems
+        ds_list = args.datasets
+        sys_list = args.agent_systems
 
         for dataset in ds_list:
             for system in sys_list:
@@ -140,12 +94,12 @@ def main() -> int:
     total = sum(r[3] for r in rows)
 
     # Print table
-    print(f"{'Track':<12} {'Dataset':<22} {'System':<18} {'Est. cost':>10}")
-    print("-" * 68)
+    print(f"{'Track':<12} {'Dataset':<22} {'System':<22} {'Est. cost':>10}")
+    print("-" * 72)
     for track, dataset, system, cost in sorted(rows, key=lambda r: -r[3]):
-        print(f"{track:<12} {dataset:<22} {system:<18} ${cost:>9.4f}")
-    print("-" * 68)
-    print(f"{'TOTAL':<54} ${total:>9.4f}")
+        print(f"{track:<12} {dataset:<22} {system:<22} ${cost:>9.4f}")
+    print("-" * 72)
+    print(f"{'TOTAL':<58} ${total:>9.4f}")
     print()
     print(f"Limit={args.limit}  Judge={args.judge}  Threshold=${args.threshold:.2f}")
 

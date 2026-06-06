@@ -39,8 +39,8 @@ def test_estimate_cost_runs():
 def test_estimate_cost_shows_systems():
     result = run_estimate("--limit", "1")
     assert result.returncode == 0
-    # Should show at least one brain system.
-    assert "pgvector-naive" in result.stdout or "unison-brain" in result.stdout
+    # Should show at least one agent system.
+    assert "unison-agent" in result.stdout
 
 
 def test_estimate_cost_budget_gate_passes_under_threshold():
@@ -57,16 +57,15 @@ def test_estimate_cost_budget_gate_triggers_over_threshold():
 
 
 def test_estimate_cost_only_track_filter():
-    result = run_estimate("--limit", "5", "--tracks", "brain")
+    result = run_estimate("--limit", "5", "--tracks", "agent")
     assert result.returncode == 0
-    # Should not include pure agent systems in output.
-    assert "brain" in result.stdout.lower() or "pgvector" in result.stdout
+    assert "agent" in result.stdout.lower() or "unison-agent" in result.stdout
 
 
 def test_estimate_cost_only_dataset_filter():
-    result = run_estimate("--limit", "5", "--datasets", "bitempoqa")
+    result = run_estimate("--limit", "5", "--datasets", "longmemeval")
     assert result.returncode == 0
-    assert "bitempoqa" in result.stdout
+    assert "longmemeval" in result.stdout
 
 
 # ---------------------------------------------------------------------------

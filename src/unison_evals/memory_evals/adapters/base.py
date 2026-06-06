@@ -3,12 +3,10 @@
 Two contracts:
   * `AgentAdapter` for Tracks 2 (oracle) and 3 (E2E) — answers questions.
   * `BrainAdapter` for Track 1 (brain-only retrieval) — ingests docs and
-    returns ranked chunks. Memory systems (Mem0, Letta, Zep) and pure
-    vector stores (pgvector_naive) implement this. Some systems
-    implement both (e.g. Mem0 has retrieval + answer modes).
+    returns ranked chunks.
 
 The contracts are intentionally small (one required method each) so
-adding a new comparator is ~80 LOC.
+adding a new adapter is ~80 LOC.
 """
 
 from __future__ import annotations
@@ -79,7 +77,7 @@ class BrainAdapter(ABC):
       * `reset()` — wipe all ingested data so the next ingest starts clean.
         Used between eval questions when each question has its own corpus
         (LongMemEval, MemoryAgentBench). Defaults to a no-op; adapters that
-        support reset (Mem0 user-scoped wipes, pgvector TRUNCATE) override.
+        support reset override it here.
 
     The contract is dataset-agnostic. Datasets convert their per-question
     haystack into `list[Document]`; the runner calls `reset()` then

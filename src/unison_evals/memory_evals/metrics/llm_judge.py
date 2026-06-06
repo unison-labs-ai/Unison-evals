@@ -142,13 +142,19 @@ class LLMJudge:
             text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
             return text, resp.usage.input_tokens, resp.usage.output_tokens
 
-        # openai
+        # openai — the gpt-5*/o1*/o3*/o4* families have two API quirks vs gpt-4o:
+        # they reject temperature != 1.0, and they take `max_completion_tokens`
+        # instead of `max_tokens`. Coerce both so any OpenAI judge stays usable
+        # (gpt-4o, the canonical memory-bench judge, takes the classic params).
+        m = self.model.lower()
+        new_family = m.startswith(("o1", "o3", "o4")) or "gpt-5" in m
+        token_kwarg = {"max_completion_tokens": 300} if new_family else {"max_tokens": 300}
         resp = await self._openai_client().chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=300,
+            temperature=1.0 if new_family else 0.0,
             timeout=self.settings.judge_timeout,
+            **token_kwarg,
         )
         text = (resp.choices[0].message.content or "").strip()
         usage = resp.usage

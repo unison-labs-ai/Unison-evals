@@ -7,7 +7,6 @@ import pytest
 from unison_evals.memory_evals.adapters import REGISTRY, get_adapter
 from unison_evals.memory_evals.adapters._url_utils import is_localhost_url
 from unison_evals.memory_evals.adapters.base import AgentAdapter
-from unison_evals.memory_evals.adapters.claude_code import ClaudeCodeAdapter
 from unison_evals.memory_evals.adapters.unison_agent import UnisonAgentAdapter
 
 # ---------------------------------------------------------------------------
@@ -131,13 +130,13 @@ async def test_setup_includes_auth_header_when_jwt_provided(httpx_mock, monkeypa
 
 
 # ---------------------------------------------------------------------------
-# Existing tests below (unchanged)
+# Registry and contract tests
 # ---------------------------------------------------------------------------
 
 
 def test_registry_has_built_ins() -> None:
     assert "unison-agent" in REGISTRY
-    assert "claude-code" in REGISTRY
+    assert "unison-agent-pipeline" in REGISTRY
 
 
 def test_get_adapter_returns_instance() -> None:
@@ -211,48 +210,3 @@ async def test_unison_adapter_handles_500(httpx_mock) -> None:
         assert "500" in result.error
     finally:
         await adapter.teardown()
-
-
-def test_claude_code_prompt_with_oracle() -> None:
-    prompt = ClaudeCodeAdapter._build_prompt("What time?", "Some context here.")
-    assert "What time?" in prompt
-    assert "Some context here." in prompt
-    assert "<context>" in prompt
-
-
-def test_claude_code_prompt_without_oracle() -> None:
-    prompt = ClaudeCodeAdapter._build_prompt("What time?", None)
-    assert prompt == "What time?"
-
-
-def test_claude_code_parse_json_output() -> None:
-    raw = '{"result": "The flight lands at 9:45 PM.", "usage": {"input_tokens": 100, "output_tokens": 30}}'
-    answer, usage = ClaudeCodeAdapter._parse_output(raw)
-    assert answer == "The flight lands at 9:45 PM."
-    assert usage["input_tokens"] == 100
-
-
-def test_claude_code_parse_plain_text_fallback() -> None:
-    answer, usage = ClaudeCodeAdapter._parse_output("Plain text response\n")
-    assert answer == "Plain text response"
-    assert usage == {}
-
-
-def test_claude_code_cost_estimate_with_usage() -> None:
-    cost = ClaudeCodeAdapter._estimate_cost(
-        usage={"input_tokens": 1_000_000, "output_tokens": 1_000_000},
-        prompt="x",
-        answer="y",
-    )
-    # Sonnet 4.5: $3 + $15 per Mtok = $18 total for 1M+1M
-    assert abs(cost - 18.0) < 0.01
-
-
-def test_claude_code_cost_estimate_fallback_to_chars() -> None:
-    cost = ClaudeCodeAdapter._estimate_cost(
-        usage={},
-        prompt="x" * 4_000_000,  # ~1M tokens
-        answer="y" * 4_000_000,
-    )
-    # Approximation: 1M tokens each, same pricing as above
-    assert abs(cost - 18.0) < 1.0

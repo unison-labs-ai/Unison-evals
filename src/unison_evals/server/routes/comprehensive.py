@@ -33,7 +33,7 @@ def _scan_comprehensive_dirs(results_dir: Path) -> list[Path]:
 def _load_combo_from_file(filepath: Path, comprehensive_id: str) -> dict[str, Any]:
     """Parse a single (track, dataset, system) result JSON into a combo entry."""
     # File name pattern: <track>-<dataset>-<system>.json
-    stem = filepath.stem  # e.g. brain-bitempoqa-pgvector-naive
+    stem = filepath.stem  # e.g. agent-longmemeval-unison-agent
     parts = stem.split("-", 2)
     track = parts[0] if len(parts) > 0 else "unknown"
     dataset = parts[1] if len(parts) > 1 else "unknown"
@@ -109,9 +109,9 @@ def list_comprehensive(request: Request) -> dict[str, Any]:
           "combos": [
             {
               "comprehensive_id": "...",
-              "track": "brain",
-              "dataset": "bitempoqa",
-              "system": "pgvector-naive",
+              "track": "agent",
+              "dataset": "longmemeval",
+              "system": "unison-agent",
               "status": "done",
               "pass_rate": null,        // null for brain track
               "recall_at_10": 0.72,

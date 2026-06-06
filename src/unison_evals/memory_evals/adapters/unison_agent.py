@@ -107,10 +107,13 @@ class UnisonAgentAdapter(AgentAdapter):
                 error="seed_docs and oracle_context are mutually exclusive",
             )
 
-        body: dict[str, Any] = {
-            "question": question,
-            "model": self.settings.default_agent_model,
-        }
+        # Submit the task WITHOUT a model so the server runs its production model
+        # path (auto + escalation) exactly like a live user turn. Only pin a
+        # model for an explicit ablation (unison_agent_model set). The eval must
+        # not choose the model — that's the server's job.
+        body: dict[str, Any] = {"question": question}
+        if self.settings.unison_agent_model:
+            body["model"] = self.settings.unison_agent_model
         if oracle_context is not None:
             body["oracleContext"] = oracle_context
         if seed_docs is not None:

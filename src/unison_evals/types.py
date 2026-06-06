@@ -348,7 +348,7 @@ class ScaleRunSummary(BaseModel):
     track: Track  # always Track.SCALE
     systems: list[str]
     n_questions: int
-    corpus_label: str  # human-friendly: "msmarco-passages-v1" etc.
+    corpus_label: str  # human-friendly label for the pre-loaded corpus
     started_at: datetime
     finished_at: datetime | None = None
     total_cost_usd: float = 0.0

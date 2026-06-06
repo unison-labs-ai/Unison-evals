@@ -13,17 +13,14 @@ from typing import Any
 
 from loguru import logger
 
-from ..memory_evals.adapters import BRAIN_REGISTRY, get_brain_adapter
 from ..memory_evals.datasets import get_dataset
 from ..memory_evals.metrics.llm_judge import LLMJudge
 from ..memory_evals.runners.agent_e2e import AgentE2ERunner
 from ..memory_evals.runners.agent_oracle import AgentOracleRunner
-from ..memory_evals.runners.brain_retrieval import BrainRetrievalRunner
-from ..memory_evals.runners.scale_retrieval import ScaleRetrievalRunner
-from ..types import BrainMode, Track
+from ..types import Track
 from .storage import Storage
 
-_SUPPORTED_TRACKS = {Track.AGENT_ORACLE, Track.BRAIN_ONLY, Track.SCALE, Track.AGENT_E2E}
+_SUPPORTED_TRACKS = {Track.AGENT_ORACLE, Track.AGENT_E2E}
 
 
 class JobManager:
@@ -100,73 +97,6 @@ class JobManager:
                 name=f"run-{run_id}",
             )
 
-        elif track_enum == Track.BRAIN_ONLY:
-            for s in systems:
-                if s not in BRAIN_REGISTRY:
-                    available = ", ".join(sorted(BRAIN_REGISTRY))
-                    raise ValueError(
-                        f"System {s!r} is not a brain adapter. "
-                        f"Available brain adapters: {available}"
-                    )
-            try:
-                brain_questions = list(ds.load_brain_questions(limit=limit))
-            except NotImplementedError as e:
-                raise ValueError(str(e)) from e
-
-            brain_mode = BrainMode(mode) if mode else BrainMode.COLD
-            brain_adapters = {s: get_brain_adapter(s) for s in systems}
-            runner = BrainRetrievalRunner(systems=brain_adapters, mode=brain_mode)
-            run_id = runner.run_id
-            self.storage.create_run(
-                run_id=run_id,
-                dataset=dataset,
-                track=track,
-                systems=systems,
-                n_questions=len(brain_questions),
-                judge_model="none",
-            )
-            task = asyncio.create_task(
-                self._drive_brain_run(run_id, runner, brain_questions, dataset),
-                name=f"run-{run_id}",
-            )
-
-        elif track_enum == Track.SCALE:
-            if not corpus:
-                raise ValueError(
-                    "track=scale requires a corpus label. "
-                    "Pass corpus=<label> (e.g. 'msmarco-passages-v1-100k'). "
-                    "Make sure you've run scripts/load_corpus_*.sh first."
-                )
-            for s in systems:
-                if s not in BRAIN_REGISTRY:
-                    available = ", ".join(sorted(BRAIN_REGISTRY))
-                    raise ValueError(
-                        f"System {s!r} is not a brain adapter. "
-                        f"Available brain adapters: {available}"
-                    )
-            load_fn = getattr(ds, "load_scale_questions", None)
-            if load_fn is None:
-                raise ValueError(
-                    f"Dataset {dataset!r} does not support track=scale. "
-                    "It must implement load_scale_questions(). Currently supported: msmarco."
-                )
-            scale_questions = list(load_fn(limit=limit))
-            brain_adapters = {s: get_brain_adapter(s) for s in systems}
-            runner = ScaleRetrievalRunner(systems=brain_adapters, corpus_label=corpus)
-            run_id = runner.run_id
-            self.storage.create_run(
-                run_id=run_id,
-                dataset=dataset,
-                track=track,
-                systems=systems,
-                n_questions=len(scale_questions),
-                judge_model="none",
-            )
-            task = asyncio.create_task(
-                self._drive_scale_run(run_id, runner, scale_questions, dataset),
-                name=f"run-{run_id}",
-            )
-
         else:
             raise ValueError(f"Unhandled track {track!r}")
 
@@ -236,70 +166,6 @@ class JobManager:
             raise
         except Exception as e:
             logger.exception("E2E run {} crashed", run_id)
-            self.storage.update_status(run_id, "failed", error=str(e))
-            self._broadcast(
-                run_id,
-                {"type": "run_failed", "run_id": run_id, "error": str(e)},
-            )
-        finally:
-            self._broadcast(run_id, {"type": "_eof", "run_id": run_id})
-            self._tasks.pop(run_id, None)
-
-    async def _drive_brain_run(
-        self,
-        run_id: str,
-        runner: BrainRetrievalRunner,
-        questions: list,
-        dataset_name: str,
-    ) -> None:
-        self.storage.update_status(run_id, "running")
-        try:
-            async for ev in runner.run(questions, dataset_name=dataset_name):
-                payload = ev.model_dump(mode="json")
-                self._broadcast(run_id, payload)
-                if ev.type == "run_completed" and ev.summary is not None:
-                    self.storage.save_summary(
-                        run_id,
-                        summary=ev.summary.model_dump(mode="json"),
-                        results=[r.model_dump(mode="json") for r in runner.results],
-                    )
-                    self.storage.update_status(run_id, "completed")
-                elif ev.type == "run_failed":
-                    self.storage.update_status(run_id, "failed", error=ev.error)
-        except Exception as e:
-            logger.exception("Brain run {} crashed", run_id)
-            self.storage.update_status(run_id, "failed", error=str(e))
-            self._broadcast(
-                run_id,
-                {"type": "run_failed", "run_id": run_id, "error": str(e)},
-            )
-        finally:
-            self._broadcast(run_id, {"type": "_eof", "run_id": run_id})
-            self._tasks.pop(run_id, None)
-
-    async def _drive_scale_run(
-        self,
-        run_id: str,
-        runner: ScaleRetrievalRunner,
-        questions: list,
-        dataset_name: str,
-    ) -> None:
-        self.storage.update_status(run_id, "running")
-        try:
-            async for ev in runner.run(questions, dataset_name=dataset_name):
-                payload = ev.model_dump(mode="json")
-                self._broadcast(run_id, payload)
-                if ev.type == "run_completed" and ev.summary is not None:
-                    self.storage.save_summary(
-                        run_id,
-                        summary=ev.summary.model_dump(mode="json"),
-                        results=[r.model_dump(mode="json") for r in runner.results],
-                    )
-                    self.storage.update_status(run_id, "completed")
-                elif ev.type == "run_failed":
-                    self.storage.update_status(run_id, "failed", error=ev.error)
-        except Exception as e:
-            logger.exception("Scale run {} crashed", run_id)
             self.storage.update_status(run_id, "failed", error=str(e))
             self._broadcast(
                 run_id,

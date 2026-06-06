@@ -5,9 +5,8 @@ BrainMode.COLD (default, original behaviour)
 
 BrainMode.WARM
     Corpus already loaded; skip reset+ingest, iterate search only.
-    Equivalent to ScaleRetrievalRunner but expressed as a Track 1 sub-mode.
-    Use when the dataset supports pre-loading (e.g. MS MARCO, BitempoQA shared
-    corpus) and you want to amortise ingest cost across many queries.
+    Use when the dataset supports pre-loading and you want to amortise
+    ingest cost across many queries.
 
 BrainMode.BITEMPORAL
     Per-question: reset → ingest → search → score with temporal_correct_at_1.
@@ -86,7 +85,7 @@ class BrainRetrievalRunner:
 
     Use:
         runner = BrainRetrievalRunner(
-            systems={"pgvector-naive": adapter},
+            systems={"unison-brain": adapter},
             mode=BrainMode.COLD,         # default
         )
         async for event in runner.run(questions):

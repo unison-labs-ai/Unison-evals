@@ -134,6 +134,14 @@ def run(
             )
 
     datasets = list(BENCHMARKS) if dataset == "all" else [dataset]
+    if output is not None and len(datasets) > 1:
+        # One --output file can't hold multiple benchmarks (each would overwrite
+        # the prior, and context-bench writes its own results dir). Every run
+        # already persists to results/ automatically.
+        raise click.UsageError(
+            "--output is only valid for a single --dataset, not 'all'. "
+            "Each benchmark already writes to results/ automatically."
+        )
     mode = "REAL (canonical, publishable)" if (real_mode or judge) else "DEV (cheap Gemini)"
     for ds in datasets:
         if len(datasets) > 1:

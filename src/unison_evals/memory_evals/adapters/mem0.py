@@ -249,7 +249,7 @@ class Mem0AgentAdapter(AgentAdapter):
                 system = "You are a helpful assistant. Answer the following question."
 
             response = await self._anthropic.messages.create(
-                model=self.settings.default_agent_model,
+                model=self.settings.baseline_agent_model,
                 max_tokens=1024,
                 system=system,
                 messages=[{"role": "user", "content": question}],

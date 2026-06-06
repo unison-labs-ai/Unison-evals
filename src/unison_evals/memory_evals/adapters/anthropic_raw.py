@@ -67,7 +67,7 @@ class AnthropicRawAdapter(AgentAdapter):
         from anthropic import AsyncAnthropic
 
         self._client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
-        logger.debug("anthropic-raw adapter ready, model={}", self.settings.default_agent_model)
+        logger.debug("anthropic-raw adapter ready, model={}", self.settings.baseline_agent_model)
 
     async def answer(
         self,
@@ -94,7 +94,7 @@ class AnthropicRawAdapter(AgentAdapter):
 
         try:
             response = await self._client.messages.create(
-                model=self.settings.default_agent_model,
+                model=self.settings.baseline_agent_model,
                 max_tokens=1500,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}],

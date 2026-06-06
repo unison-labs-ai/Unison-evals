@@ -58,9 +58,11 @@ class Settings(BaseSettings):
 
     # Models
     judge_model: str = "claude-opus-4-5-20250101"
-    # Generation model for the no-memory BASELINE adapters (anthropic-raw, mem0)
-    # — these call a provider directly, so they need a concrete model.
-    default_agent_model: str = "claude-sonnet-4-5"
+    # Generation model for the non-Unison COMPARATOR baselines only
+    # (anthropic-raw = bare LLM, mem0 = competitor) — they call a provider
+    # directly, so they need a concrete model. NOTHING to do with the Unison
+    # agent (which runs the server's prod model) or the judge.
+    baseline_agent_model: str = "claude-sonnet-4-5"
     # Unison SUT model override. EMPTY (default) = submit the task with NO model,
     # so the SERVER runs its production model path (auto → gemini-3-flash-preview
     # + escalation to gpt-5.4-mini / gemini-3.1-pro) exactly like a live user

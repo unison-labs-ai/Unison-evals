@@ -4,20 +4,18 @@ Loads Letta's filesystem_cloud.jsonl, runs each question through
 `UnisonContextBenchTarget`, grades the answers with the published
 rubric + judge model, and persists a paired summary.
 
-Usage:
-    .venv/bin/python -m unison_evals.benchmarks.context_bench.run -n 5
-    .venv/bin/python -m unison_evals.benchmarks.context_bench.run --task-ids 0,3,7
+Entry point: the unified CLI dispatches here —
+    unison-evals run --dataset context-bench --limit N [--dev|--real]
+via run_context_bench(). No standalone CLI (one command for all benchmarks).
 
-Comparison cell: Letta's published Sonnet 4.5 + open_files/grep_files
-on this exact dataset = 74.0% (leaderboard.letta.com).
+Comparison cell: Letta's published leaderboard on this exact dataset
+(leaderboard.letta.com).
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -98,133 +96,40 @@ def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
     }
 
 
-def _resolve_args() -> tuple[list[int] | None, str, str]:
-    """Resolve CLI flags. Returns task_ids (None means 'run all rows';
-    `[]` is rejected upstream as invalid, never used as a sentinel)."""
-    p = argparse.ArgumentParser(
-        prog="context_bench.run",
-        description="Unison cell on Letta's Context-Bench filesystem suite.",
-    )
-    p.add_argument(
-        "-n",
-        "--num-tasks",
-        type=int,
-        default=None,
-        help="Run the first N rows (tasks 0..N-1). Must be >= 1.",
-    )
-    p.add_argument(
-        "--task-ids",
-        type=str,
-        default=None,
-        help="Comma-separated row indices (0-based, non-negative), or 'all'.",
-    )
-    p.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="Agent model. Default: $TAUBENCH_AGENT_MODEL or claude-sonnet-4-5.",
-    )
-    p.add_argument(
-        "--judge-model",
-        type=str,
-        default=None,
-        help="Explicit LLM-judge model (overrides --dev/--real).",
-    )
-    mode = p.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--real",
-        action="store_true",
-        help="Real judge: gpt-5-mini (Letta-leaderboard parity, publishable).",
-    )
-    mode.add_argument(
-        "--dev",
-        action="store_true",
-        help="Dev judge: cheap Gemini (dev_judge_model), for test/tune/research loops. DEFAULT.",
-    )
-    a = p.parse_args()
+def run_context_bench(
+    *,
+    limit: int | None,
+    judge_model: str,
+    agent_model: str | None = None,
+) -> dict:
+    """Run the Context-Bench filesystem suite as the Unison cell.
 
-    model = a.model or os.environ.get("TAUBENCH_AGENT_MODEL") or "claude-sonnet-4-5"
-    # Judge model:
-    #   --judge-model X  explicit override, always wins
-    #   --real           gpt-5-mini (Letta-leaderboard parity, publishable)
-    #   --dev (default)  cheap Gemini judge for test/tune/research loops
-    # $JUDGE_MODEL is deliberately NOT honoured here — it's a memory-evals
-    # holdover that silently breaks Letta apples-to-apples comparison.
-    from ...config import get_settings
-
-    if a.judge_model:
-        judge_model = a.judge_model
-    elif a.real:
-        judge_model = judge.DEFAULT_JUDGE_MODEL
-    else:
-        judge_model = get_settings().dev_judge_model
-
-    # task_ids resolution. Sentinel for "run all rows" is `None` (filled
-    # after dataset load), never an empty list. -n must be >= 1; explicit
-    # task IDs must be non-negative (Python's reverse-indexing semantics
-    # would silently pick the wrong row otherwise).
-    task_ids: list[int] | None
-    if a.num_tasks is not None:
-        if a.num_tasks < 1:
-            p.error(f"--num-tasks must be >= 1, got {a.num_tasks}")
-        task_ids = list(range(a.num_tasks))
-    elif a.task_ids and a.task_ids.strip().lower() == "all":
-        task_ids = None  # filled to range(len(rows)) after load
-    elif a.task_ids:
-        try:
-            parsed = [int(t.strip()) for t in a.task_ids.split(",") if t.strip()]
-        except ValueError as e:
-            p.error(f"--task-ids must be comma-separated integers: {e}")
-        if any(t < 0 for t in parsed):
-            p.error(f"--task-ids must be non-negative (0-based), got {parsed}")
-        if not parsed:
-            p.error("--task-ids is empty after parsing")
-        task_ids = parsed
-    else:
-        task_ids = [0, 1, 2]
-
-    return task_ids, model, judge_model
-
-
-def main() -> int:
-    task_ids, model, judge_model = _resolve_args()
-
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("ERROR: OPENAI_API_KEY missing (needed by the judge)", file=sys.stderr)
-        return 1
-    if model.startswith("claude") and not os.environ.get("ANTHROPIC_API_KEY"):
-        print(
-            "ERROR: ANTHROPIC_API_KEY missing (needed by the claude agent inside Unison)",
-            file=sys.stderr,
-        )
-        return 1
-
+    limit None = all rows; else the first `limit` rows. agent_model None = the
+    server's production model path (auto + escalation), like a live user turn —
+    pin one only for an explicit ablation. judge_model is resolved by the caller
+    (the unified CLI's --dev/--real). Returns the summary dict.
+    """
     rows = _load_rows()
-    # `None` is the "run all" sentinel from _resolve_args; an empty list
-    # cannot occur (the parser rejects it).
-    if task_ids is None:
-        task_ids = list(range(len(rows)))
-    if max(task_ids) >= len(rows):
-        print(f"ERROR: task id {max(task_ids)} >= dataset size {len(rows)}", file=sys.stderr)
-        return 1
+    n_rows = len(rows) if limit is None else max(1, min(limit, len(rows)))
+    task_ids = list(range(n_rows))
 
-    log_dir = _REPO_ROOT / "results" / "context-bench" / "unison" / model.replace("/", "_")
+    model_label = agent_model or "auto-prod"
+    log_dir = _REPO_ROOT / "results" / "context-bench" / "unison" / model_label.replace("/", "_")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    target = UnisonContextBenchTarget(model=model)
+    target = UnisonContextBenchTarget(model=agent_model)
     judge_provider = judge.derive_provider(judge_model)
     judge_label = f"{judge_provider}/{judge_model}"
 
-    # Pre-flight: confirm the judge model is actually reachable with one
-    # tiny call. Better to fail fast than 100 rows in.
+    # Pre-flight: confirm the judge model is reachable with one tiny call (also
+    # surfaces a missing judge API key). Better to fail fast than 100 rows in.
     try:
         judge.grade("preflight question", "preflight gt", "preflight gt", model=judge_model)
     except Exception as e:
-        print(f"ERROR: judge model {judge_model!r} unreachable: {e}", file=sys.stderr)
-        return 1
+        raise RuntimeError(f"judge model {judge_model!r} unreachable: {e}") from e
 
     print("Context-Bench / filesystem suite — Unison cell")
-    print(f"  Agent model: {model}")
+    print(f"  Agent model: {model_label}")
     print(f"  Judge model: {judge_label}")
     print(f"  Tasks:       {len(task_ids)} row(s) (idx {task_ids[0]}..{task_ids[-1]})")
     print(f"  Log dir:     {log_dir}")
@@ -240,9 +145,8 @@ def main() -> int:
     try:
         target.setup()
     except Exception as e:
-        print(f"ERROR: provision/seed failed: {e}", file=sys.stderr)
         target.close()
-        return 1
+        raise RuntimeError(f"provision/seed failed: {e}") from e
     ran_tenant_id = target.tenant_id  # capture before close() nulls it
     print(f"  Tenant:      {ran_tenant_id} (ephemeral, is_eval) — seeded {target.seeded_pages} pages")
     print()
@@ -320,7 +224,7 @@ def main() -> int:
     summary = {
         "benchmark": "context-bench-filesystem",
         "cell": "unison-bash-md",
-        "agent_model": model,
+        "agent_model": model_label,
         "judge_model": judge_model,
         "n": n,
         "score_sum": total_score,
@@ -329,7 +233,7 @@ def main() -> int:
         "total_agent_cost_usd": total_cost,
         "task_ids": task_ids,
         "results": results,
-        "manifest": _manifest(model, judge_label, ran_tenant_id),
+        "manifest": _manifest(model_label, judge_label, ran_tenant_id),
         # leaderboard.letta.com, Filesystem suite, as of 2026-03-13. Same dataset,
         # same gpt-5-mini judge + rubric — only the agent interface differs.
         "comparator_cells": {
@@ -340,13 +244,9 @@ def main() -> int:
     }
     (log_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print("─── Summary ──────────────────────────────────────────")
-    print(f"  Unison cell ({model}):   {total_score:.1f}/{n} = {pct:.1f}%")
+    print(f"  Unison cell ({model_label}):   {total_score:.1f}/{n} = {pct:.1f}%")
     print("  Letta cell (Sonnet 4.6): 88.0%  (leaderboard.letta.com, 2026-03-13)")
     print(f"  Δ vs Letta Sonnet 4.6:   {pct - 88.0:+.1f}pp  (top model GPT-5.2-codex: 93%)")
     print(f"  Total agent cost:        ${total_cost:.3f}")
     print(f"  Written:                 {log_dir / 'summary.json'}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return summary

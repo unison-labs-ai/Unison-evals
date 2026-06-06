@@ -45,7 +45,7 @@ class UnisonContextBenchTarget:
     def __init__(
         self,
         api_url: str | None = None,
-        model: str = "claude-sonnet-4-5",
+        model: str | None = None,
         timeout: float = 600.0,
     ) -> None:
         self.api_url = (
@@ -99,16 +99,17 @@ class UnisonContextBenchTarget:
         )
 
         t0 = time.monotonic()
-        resp = self._client.post(
-            "/api/rest/agents/eval-turn",
-            json={
-                "tenantId": self.tenant_id,
-                "question": framing,
-                "model": self.model,
-                # Each row must be iid — skip Memory-v2 extract.turn.
-                "memoryMode": "fresh",
-            },
-        )
+        body: dict = {
+            "tenantId": self.tenant_id,
+            "question": framing,
+            # Each row must be iid — skip Memory-v2 extract.turn.
+            "memoryMode": "fresh",
+        }
+        # No model = the server runs its production path (auto + escalation),
+        # like a live user turn. Pin one only for an explicit ablation.
+        if self.model:
+            body["model"] = self.model
+        resp = self._client.post("/api/rest/agents/eval-turn", json=body)
         resp.raise_for_status()
         data = resp.json()
         elapsed = time.monotonic() - t0

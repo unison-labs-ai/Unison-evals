@@ -41,7 +41,12 @@ JUDGE_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.0),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-5-mini": (0.25, 2.0),
-    # --- Google (dev/research judge — cheap, on Gemini credits) ---
+    # --- Google (dev/research judge — cheap, on Gemini credits). Current gen
+    #     (June 2026): 3.5-flash / 3.1-flash-lite GA, 3-flash preview. ---
+    "gemini-3.5-flash": (1.50, 9.00),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
+    "gemini-3-flash-preview": (0.50, 3.00),
+    # legacy 2.5 generation (kept for back-compat)
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-pro": (1.25, 10.0),

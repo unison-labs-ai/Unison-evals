@@ -239,19 +239,10 @@ def run_context_bench(
         "task_ids": task_ids,
         "results": results,
         "manifest": _manifest(model_label, judge_label, ran_tenant_id),
-        # leaderboard.letta.com, Filesystem suite, as of 2026-03-13. Same dataset,
-        # same gpt-5-mini judge + rubric — only the agent interface differs.
-        "comparator_cells": {
-            "letta_agent_gpt_5_2_codex": 0.93,
-            "letta_agent_gpt_5_4": 0.89,
-            "letta_agent_sonnet_4_6": 0.88,
-        },
     }
     out_path.write_text(json.dumps(summary, indent=2))
     print("─── Summary ──────────────────────────────────────────")
-    print(f"  Unison cell ({model_label}):   {total_score:.1f}/{n} = {pct:.1f}%")
-    print("  Letta cell (Sonnet 4.6): 88.0%  (leaderboard.letta.com, 2026-03-13)")
-    print(f"  Δ vs Letta Sonnet 4.6:   {pct - 88.0:+.1f}pp  (top model GPT-5.2-codex: 93%)")
-    print(f"  Total agent cost:        ${total_cost:.3f}")
-    print(f"  Written:                 {out_path}")
+    print(f"  Score:             {total_score:.1f}/{n} = {pct:.1f}%")
+    print(f"  Total agent cost:  ${total_cost:.3f}")
+    print(f"  Written:           {out_path}")
     return summary

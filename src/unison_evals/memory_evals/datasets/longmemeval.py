@@ -49,13 +49,39 @@ def _maybe_stratify(rows: Any, limit: int | None) -> list:
     if cats:
         wanted = {c.strip() for c in cats.split(",") if c.strip()}
         rows = [r for r in rows if str(r.get("question_type") or "?") in wanted]
-    if not os.environ.get("EVAL_STRATIFIED") or limit is None:
+    mode = os.environ.get("EVAL_STRATIFIED")
+    if not mode or limit is None:
         return rows
     groups: dict[str, list] = {}
     for r in rows:
         groups.setdefault(str(r.get("question_type") or "?"), []).append(r)
-    ordered: list = []
     keys = list(groups.keys())
+
+    # proportional: sample each category at its real share of the full set, so a
+    # dev sample of `limit` mirrors the 500-set category mix (weighted overall).
+    # Largest-remainder apportionment makes the per-category counts sum to exactly
+    # `limit`; sampling within a category is seeded for reproducibility.
+    if mode == "proportional":
+        import random
+
+        total = sum(len(groups[k]) for k in keys)
+        rng = random.Random(int(os.environ.get("EVAL_SEED", "1234")))
+        raw = {k: limit * len(groups[k]) / total for k in keys}
+        base = {k: int(raw[k]) for k in keys}
+        remainder = limit - sum(base.values())
+        # hand out the leftover slots to the largest fractional parts
+        for k in sorted(keys, key=lambda k: raw[k] - base[k], reverse=True)[:remainder]:
+            base[k] += 1
+        picked: list = []
+        for k in keys:
+            pool = list(groups[k])
+            rng.shuffle(pool)
+            picked.extend(pool[: base[k]])
+        rng.shuffle(picked)
+        return picked
+
+    # default ("round-robin" / any truthy value): equal coverage across categories.
+    ordered: list = []
     while any(groups[k] for k in keys):
         for k in keys:
             if groups[k]:

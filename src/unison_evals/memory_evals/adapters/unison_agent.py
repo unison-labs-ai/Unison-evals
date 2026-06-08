@@ -36,7 +36,7 @@ def _to_writable_seed_path(path: str, ns: str) -> str:
 
 from ...config import get_settings  # noqa: E402
 from ...types import AdapterResult, Document  # noqa: E402
-from ..preingest import load_manifest, tenant_for  # noqa: E402
+from ..preingest import load_manifest, save_manifest, tenant_for  # noqa: E402
 from ._url_utils import is_localhost_url  # noqa: E402
 from .base import AgentAdapter  # noqa: E402
 
@@ -53,9 +53,12 @@ class UnisonAgentAdapter(AgentAdapter):
         self.settings = get_settings()
         self._client: httpx.AsyncClient | None = None
         self._isolate_per_question: bool = False
-        # When UNISON_PREINGEST_MANIFEST is set, questions whose id is in the
-        # manifest reuse a persistent pre-ingested tenant (no seed, no teardown).
+        # When UNISON_PREINGEST_MANIFEST is set, the manifest is a reuse cache:
+        # a question already in it reuses its persistent tenant (no re-seed, no
+        # teardown); a question NOT in it is seeded once, then recorded + kept so
+        # the NEXT run reuses it. First run seeds, later runs are query-only.
         self._manifest: dict[str, Any] | None = None
+        self._manifest_path: str | None = None
 
     async def setup(self) -> None:
         is_localhost = is_localhost_url(self.settings.unison_api_url)
@@ -78,11 +81,12 @@ class UnisonAgentAdapter(AgentAdapter):
 
         manifest_path = os.environ.get("UNISON_PREINGEST_MANIFEST")
         if manifest_path:
+            self._manifest_path = manifest_path
             self._manifest = load_manifest(manifest_path)
             logger.info(
-                "preingest manifest loaded",
+                "preingest reuse-cache loaded",
                 path=manifest_path,
-                questions=len(self._manifest.get("questions", {})),
+                cached=len(self._manifest.get("questions", {})),
             )
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -194,6 +198,18 @@ class UnisonAgentAdapter(AgentAdapter):
                 )
 
             data = response.json()
+            # Self-cache: a freshly-seeded tenant (manifest mode, not already
+            # cached) is recorded + kept so the NEXT run reuses it read-only
+            # instead of re-seeding from scratch.
+            if (
+                self._manifest is not None
+                and self._manifest_path is not None
+                and provisioned_tenant is not None
+                and question_id is not None
+            ):
+                self._manifest.setdefault("questions", {})[question_id] = provisioned_tenant
+                save_manifest(self._manifest_path, self._manifest)
+
             raw: dict[str, Any] = dict(data)
             # Surface Track 3 ingest telemetry if the server returned it.
             if "seedDocsCount" in data:
@@ -230,9 +246,10 @@ class UnisonAgentAdapter(AgentAdapter):
                 error=f"HTTP error: {e}",
             )
         finally:
-            # Only tear down tenants WE provisioned for this single question.
-            # Pre-ingested tenants are persistent (reused + analysed later).
-            if provisioned_tenant is not None:
+            # Tear down only in pure-ephemeral mode. In manifest mode we KEEP
+            # every provisioned tenant — it's just been cached for reuse by the
+            # next run (and its brain + trajectory persist for analysis).
+            if provisioned_tenant is not None and self._manifest is None:
                 await self._teardown_tenant(provisioned_tenant)
 
     async def preingest_question(
@@ -253,6 +270,9 @@ class UnisonAgentAdapter(AgentAdapter):
             "question": question,
             "tenantId": tenant_id,
             "memoryMode": "fresh",
+            # Build the brain only — skip the (throwaway) agent answer. ~30%
+            # cheaper + faster during bulk pre-ingestion.
+            "seedOnly": True,
             # kind="note" (not "raw") so the seed enqueues extraction — the
             # whole point of pre-ingest is to build the fact/observation graph.
             "seedDocs": [

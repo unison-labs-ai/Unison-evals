@@ -32,10 +32,11 @@ def _to_writable_seed_path(path: str, ns: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem.replace("/", "--")).strip("-") or "doc"
     return f"/private/sources/eval/{ns}/{slug[:120]}.md"
 
-from ...config import get_settings
-from ...types import AdapterResult, Document
-from ._url_utils import is_localhost_url
-from .base import AgentAdapter
+
+from ...config import get_settings  # noqa: E402
+from ...types import AdapterResult, Document  # noqa: E402
+from ._url_utils import is_localhost_url  # noqa: E402
+from .base import AgentAdapter  # noqa: E402
 
 
 class UnisonAgentAdapter(AgentAdapter):
@@ -216,7 +217,9 @@ class UnisonAgentAdapter(AgentAdapter):
                 "/api/rest/agents/eval/provision", json={"label": "longmemeval"}
             )
             if resp.status_code != 200:
-                logger.warning("eval/provision failed", status=resp.status_code, body=resp.text[:300])
+                logger.warning(
+                    "eval/provision failed", status=resp.status_code, body=resp.text[:300]
+                )
                 return None
             return str(resp.json().get("tenantId")) or None
         except httpx.HTTPError as e:
@@ -232,7 +235,9 @@ class UnisonAgentAdapter(AgentAdapter):
                 "/api/rest/agents/eval/teardown", json={"tenantId": tenant_id}
             )
             if resp.status_code != 200:
-                logger.warning("eval/teardown failed", status=resp.status_code, body=resp.text[:300])
+                logger.warning(
+                    "eval/teardown failed", status=resp.status_code, body=resp.text[:300]
+                )
         except httpx.HTTPError as e:
             logger.warning("eval/teardown error", tenant=tenant_id, error=str(e))
 

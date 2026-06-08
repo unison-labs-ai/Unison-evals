@@ -73,7 +73,9 @@ async def start_run(req: StartRunRequest, request: Request) -> dict[str, str]:
             if s not in ADAPTER_REGISTRY:
                 raise HTTPException(400, f"Unknown agent system: {s}")
     else:
-        raise HTTPException(400, f"Unknown track: {req.track!r}. Supported: {', '.join(sorted(_AGENT_TRACKS))}")
+        raise HTTPException(
+            400, f"Unknown track: {req.track!r}. Supported: {', '.join(sorted(_AGENT_TRACKS))}"
+        )
 
     # Validate dataset/track compatibility.
     ds_cls = DATASET_REGISTRY[req.dataset]

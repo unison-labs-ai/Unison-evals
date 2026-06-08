@@ -63,7 +63,9 @@ across two or more files.
 
 def _build_pages() -> list[BrainPage]:
     pages: list[BrainPage] = [
-        BrainPage(path="/private/sources/eval/context-bench/SCHEMA.md", body_md=SCHEMA_MD, kind="raw"),
+        BrainPage(
+            path="/private/sources/eval/context-bench/SCHEMA.md", body_md=SCHEMA_MD, kind="raw"
+        ),
     ]
     missing: list[str] = []
     for name in CORPUS_FILES:

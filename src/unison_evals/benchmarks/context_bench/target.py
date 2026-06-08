@@ -62,9 +62,7 @@ class UnisonContextBenchTarget:
 
     def setup(self) -> None:
         """Provision a fresh ephemeral tenant and seed the fixed corpus once."""
-        prov = self._client.post(
-            "/api/rest/agents/eval/provision", json={"label": "context-bench"}
-        )
+        prov = self._client.post("/api/rest/agents/eval/provision", json={"label": "context-bench"})
         prov.raise_for_status()
         self.tenant_id = str(prov.json()["tenantId"])
 

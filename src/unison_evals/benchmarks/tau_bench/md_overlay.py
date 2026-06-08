@@ -151,9 +151,7 @@ def build_seed_pages(env_data: dict[str, Any]) -> list[BrainPage]:
     for user_id, rec in env_data.get("users", {}).items():
         pages.append(BrainPage(path=user_path(user_id), body_md=_to_md(rec), kind="raw"))
     for product_id, rec in env_data.get("products", {}).items():
-        pages.append(
-            BrainPage(path=product_path(product_id), body_md=_to_md(rec), kind="raw")
-        )
+        pages.append(BrainPage(path=product_path(product_id), body_md=_to_md(rec), kind="raw"))
     return pages
 
 

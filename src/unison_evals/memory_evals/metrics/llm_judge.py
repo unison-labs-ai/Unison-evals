@@ -67,6 +67,7 @@ def judge_provider(model: str) -> str:
         "(expected gpt-*, claude-*, or gemini-*)."
     )
 
+
 JUDGE_PROMPT = """You are evaluating whether an AI agent's answer correctly answers a question, \
 given the expected answer.
 
@@ -189,7 +190,11 @@ class LLMJudge:
         )
         text = (resp.choices[0].message.content or "").strip()
         usage = resp.usage
-        return text, (usage.prompt_tokens if usage else 0), (usage.completion_tokens if usage else 0)
+        return (
+            text,
+            (usage.prompt_tokens if usage else 0),
+            (usage.completion_tokens if usage else 0),
+        )
 
     async def judge(
         self,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -42,7 +41,15 @@ def test_run_rejects_unknown_track() -> None:
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["run", "--systems", "fake-agent-cli", "--dataset", "longmemeval", "--track", "bogus-track"],
+        [
+            "run",
+            "--systems",
+            "fake-agent-cli",
+            "--dataset",
+            "longmemeval",
+            "--track",
+            "bogus-track",
+        ],
     )
     assert result.exit_code != 0
     assert "bogus-track" in result.output or "Invalid value" in result.output

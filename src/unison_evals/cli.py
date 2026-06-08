@@ -162,7 +162,12 @@ def run(
                 agent_model=get_settings().unison_agent_model or None,
             )
             headlines.append(
-                {"benchmark": ds, "n": cb["n"], "pct": cb["pct"], "cost_usd": cb["total_agent_cost_usd"]}
+                {
+                    "benchmark": ds,
+                    "n": cb["n"],
+                    "pct": cb["pct"],
+                    "cost_usd": cb["total_agent_cost_usd"],
+                }
             )
             continue
 
@@ -364,7 +369,9 @@ def _print_combined(headlines: list[dict]) -> None:
         table.add_row(h["benchmark"], str(h["n"]), f"{h['pct']:.1f}%", f"${h['cost_usd']:.3f}")
         total += h["cost_usd"]
     console.print(table)
-    console.print(f"[dim]Total agent cost: ${total:.3f}  (vs each benchmark's published number)[/dim]")
+    console.print(
+        f"[dim]Total agent cost: ${total:.3f}  (vs each benchmark's published number)[/dim]"
+    )
 
 
 def _print_summary_table(summary: RunSummary) -> None:

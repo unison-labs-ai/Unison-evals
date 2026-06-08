@@ -104,7 +104,7 @@ native processes (Option A) are faster because you skip the image rebuild.
 | FastAPI server | Fly.io (1 × `shared-cpu-1x`, 256 MB) | Render, Railway | ~$5/mo |
 | Next.js web | Vercel Hobby (free) | Cloudflare Pages, Netlify | $0 |
 | Postgres | Supabase free tier (500 MB) | Neon free tier, RDS t4g.micro | $0 |
-| Domain | Cloudflare DNS (Unison already uses CF?) | any registrar | ~$10/yr |
+| Domain | Cloudflare DNS | any registrar | ~$10/yr |
 | Anthropic keys | per-eval-run usage only | — | variable |
 | OpenAI keys | pgvector_naive embeddings only | — | variable |
 
@@ -424,9 +424,9 @@ create table if not exists evaluators (
 
 1. `/request-access` page submits `{email, name, org, reason}` via the Supabase
    JS client (anon key). Anon key has INSERT-only RLS on `eval_access_requests`.
-2. Supabase Webhook (or a simple cron) emails Michael when a new row arrives.
-3. Michael approves: `UPDATE eval_access_requests SET approved = true WHERE id = '...'`.
-4. Michael creates the Supabase auth user:
+2. Supabase Webhook (or a simple cron) emails the maintainer when a new row arrives.
+3. An admin approves: `UPDATE eval_access_requests SET approved = true WHERE id = '...'`.
+4. An admin creates the Supabase auth user:
    ```sql
    -- Supabase dashboard → Authentication → Users → Invite user
    -- (or via the Supabase admin API)
@@ -475,7 +475,7 @@ published leaderboard.
 
 ### 9.1 Service account
 
-1. In the eval Supabase project, create a user `evals-ci@unison.ai` via the
+1. In the eval Supabase project, create a user `evals-ci@<your-domain>` via the
    Supabase admin UI.
 2. Extend the JWT lifetime for this account (Supabase dashboard →
    Authentication → Settings → JWT expiry → set to `604800` for 7 days, or use

@@ -36,7 +36,6 @@ See each subpackage's README for details:
 | `README.md` (this file) | quickstart + repo structure |
 | [`METHODOLOGY.md`](./METHODOLOGY.md) | how scores are computed, hardware, datasets |
 | [`DEPLOY.md`](./DEPLOY.md) | deployment of the hosted leaderboard |
-| [`BENCHMARK-SPEC.md`](./BENCHMARK-SPEC.md) | the architectural thesis for the unified-md-filesystem agent interface |
 
 ## What it measures
 
@@ -77,7 +76,7 @@ uv run unison-evals run \
 
 **Methodology.** Split: `longmemeval_s_cleaned` — full ~50-session haystacks **with distractors** (the hard split Zep/Mem0 report on, not the `oracle` split). Track 3 = ingest → **multi-step agent** retrieves + reasons + answers. This is **end-to-end answer accuracy**, *not* retrieval recall@k and *not* single-pass QA — a strictly harder metric. Sampling: category-weighted proportional (`EVAL_STRATIFIED=proportional`), so `n=150` mirrors the full 500-set category mix. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
 
-**`unison-agent`** (Gemini `auto` tier: flash base, escalates to Gemini-3.1-pro / GPT-5.4-mini on hard/error turns), **~$0.02–0.03 / question**:
+**`unison-agent`** (configured model via the Unison server's auto-routing; see the Unison server for model details), **~$0.02–0.03 / question**:
 
 | Weighted run (seed) | Overall (n=150) |
 |---|---|
@@ -169,7 +168,7 @@ Fill in `reports/template.md` with the headline numbers for a shareable report.
 
 ## How the comparison stays honest
 
-- **No agent fork.** `unison-agent` adapter calls the same `/api/rest/agents/eval-turn` endpoint that ships in production. Track 3 is bit-for-bit the production agent. Track 2 uses the same agent with the brain/FS/workspace tools disabled (via the `oracleContext` knob in `assembleRunRequest`).
+- **No agent fork.** `unison-agent` adapter calls the same `/api/rest/agents/eval-turn` endpoint that ships in production. Track 3 is bit-for-bit the production agent. Track 2 uses the same agent with the brain/FS/workspace tools disabled (via the `oracleContext` knob in the eval-turn request).
 - **Fixed model + temperature.** Judge model pinned per release (`JUDGE_MODEL` env var). All systems use temperature=0 where possible.
 - **Fixed dataset versions.** Datasets are downloaded from HuggingFace at a pinned commit hash and cached locally.
 - **All numbers reproducible.** Every run writes a JSON artifact with the exact dataset hash, model versions, timestamps, and per-question scores. Re-running the same config on the same hardware gets within ±2%.
@@ -204,4 +203,4 @@ One file, ~80 LOC. See [src/unison_evals/adapters/base.py](./src/unison_evals/ad
 
 ## License
 
-MIT. Datasets retain their original licenses (LongMemEval is MIT, FRAMES is Apache 2.0, etc.).
+Apache-2.0. Datasets retain their original licenses (LongMemEval is MIT, FRAMES is Apache 2.0, etc.).

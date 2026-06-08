@@ -72,7 +72,7 @@ Reuses the τ-bench `brain_client.py` for seed / wipe — no duplication.
 
 Prerequisites:
 - Unison API up at `$UNISON_API_URL` (default `http://localhost:3001`)
-- Eval tenant `981825b2-...` provisioned (see project root `.env`)
+- Eval tenant provisioned (see your Unison server `.env`)
 - `OPENAI_API_KEY` (judge + reading the dataset)
 - `ANTHROPIC_API_KEY` (Sonnet agent inside Unison)
 - `git submodule update --init vendor/letta-evals` (corpus + dataset + rubric)

@@ -31,7 +31,7 @@ score.
 
 ---
 
-## 2. Three Tracks
+## 2. Four Tracks
 
 ### Track 1 — Brain retrieval (retrieval quality only)
 
@@ -81,6 +81,25 @@ retrieval.
 **Why isolation matters:** oracle mode is the upper-bound for what the system
 could achieve with perfect retrieval. If oracle pass rate is low, no retrieval
 improvement can fix it — the reasoning gap is the bottleneck.
+
+### Track 3 — Agent end-to-end (what users actually experience)
+
+**What it isolates:** the full pipeline — ingest, retrieve, reason, generate —
+under identical conditions for every system.
+
+**Runner lifecycle** (`src/unison_evals/runners/agent_e2e.py`, planned):
+
+1. `brain_adapter.setup()` + `agent_adapter.setup()`
+2. For each question: ingest corpus, call agent (no oracle context), score answer
+3. Report: pass rate + faithfulness + cost + latency
+
+**Status:** Track 3 is not yet runnable for `unison-brain`. The Unison API does
+not expose a bulk-ingest endpoint suitable for an eval harness; the eval-side
+ingest contract is documented in the Unison ingest API (not yet public). Track 3 is available
+for `pgvector-naive` + `mem0` + `letta` against datasets that include a
+per-question corpus (BitempoQA, MuSiQue).
+
+---
 
 ### Track 4 — Scale (retrieval at realistic corpus sizes)
 
@@ -146,25 +165,6 @@ uv run unison-evals run \
   --corpus msmarco-passages-v1-100k \
   --limit 500
 ```
-
-### Track 3 — Agent end-to-end (what users actually experience)
-
-**What it isolates:** the full pipeline — ingest, retrieve, reason, generate —
-under identical conditions for every system.
-
-**Runner lifecycle** (`src/unison_evals/runners/agent_e2e.py`, planned):
-
-1. `brain_adapter.setup()` + `agent_adapter.setup()`
-2. For each question: ingest corpus, call agent (no oracle context), score answer
-3. Report: pass rate + faithfulness + cost + latency
-
-**Status:** Track 3 is not yet runnable for `unison-brain`. The Unison API does
-not expose a bulk-ingest endpoint suitable for an eval harness; the eval-side
-ingest contract is documented in the Unison ingest API (not yet public). Track 3 is available
-for `pgvector-naive` + `mem0` + `letta` against datasets that include a
-per-question corpus (BitempoQA, MuSiQue).
-
----
 
 ## 3. Metrics — Exact Formulas
 
@@ -593,10 +593,10 @@ Preferred config: Postgres 17 with pgvector, `OPENAI_API_KEY` for embeddings,
 production brain — Postgres-native hybrid retrieval (pgvector dense + tsvector
 BM25, RRF fusion, optional cross-encoder rerank via Voyage/Cohere/local bge),
 kind boosts (`wiki_page > note > raw`), recency decay, and importance
-multipliers from cortex_facts. Called via tRPC v10 at
-`/trpc/agents.cortex.search`. Auth: `UNISON_JWT` (Supabase access token).
+multipliers from importance signals. Called via the Unison server's retrieval API
+(auth via the eval secret/JWT documented in the adapter).
 Ingest is not implemented in v1.0 (see Known Limitations); Track 1 requires
-pre-seeding via `brain-cli import`.
+pre-seeding via the Unison server's ingest endpoint.
 
 **mem0** (`src/unison_evals/adapters/mem0.py`, `Mem0BrainAdapter`): Mem0 cloud
 managed memory (https://mem0.ai). Hybrid dense + sparse retrieval proprietary to
@@ -620,8 +620,8 @@ calls with no `oracleContext`, so the full brain + FS + workspace toolchain runs
 Track 2 passes `oracleContext` to the endpoint, which disables brain/FS/workspace
 tools server-side so the agent reasons from the injected context only. This means
 Track 2 and Track 3 use the same binary; the `oracleContext` flag is a supported
-production knob, not a test-mode bypass. Requires `UNISON_JWT` and the Unison
-server running.
+production knob, not a test-mode bypass. Requires `UNISON_EVAL_SECRET` or
+`UNISON_JWT` and the Unison server running.
 
 **claude-code** (`src/unison_evals/adapters/claude_code.py`): Subprocess to
 `claude --print`. Claude Code has no persistent memory, so Track 2 and Track 3

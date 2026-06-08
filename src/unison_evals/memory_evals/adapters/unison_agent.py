@@ -61,12 +61,12 @@ class UnisonAgentAdapter(AgentAdapter):
             raise RuntimeError(
                 "Neither UNISON_EVAL_SECRET nor UNISON_JWT set. One is required when\n"
                 "UNISON_API_URL is not localhost. Preferred: set UNISON_EVAL_SECRET to the\n"
-                "server's value — the adapter then provisions a fresh ephemeral tenant per\n"
-                "question (ADR-0008), no Supabase JWT needed. For local dev: point at\n"
-                "http://localhost:3001 with UNISON_LOCAL_EVAL_TENANT_ID on the server."
+                "server's eval secret — the adapter then provisions a fresh ephemeral tenant\n"
+                "per question with no JWT needed. For local dev: point UNISON_API_URL at\n"
+                "http://localhost:3001 and set UNISON_LOCAL_EVAL_TENANT_ID on the server."
             )
 
-        # ADR-0008: when the eval secret is configured, every question runs in a
+        # When the eval secret is configured, every question runs in a
         # freshly-provisioned ephemeral tenant that is torn down afterward — true
         # per-question isolation, no cross-question retrieval contamination.
         self._isolate_per_question = has_secret
@@ -132,8 +132,8 @@ class UnisonAgentAdapter(AgentAdapter):
             # per-question sub-tenant through extract→promote→compact, then answer.
             body["ingestMode"] = self.ingest_mode
 
-        # ADR-0008: provision a throwaway tenant for this single question, run the
-        # turn against it with memoryMode="fresh", and tear it down afterward —
+        # Provision a throwaway tenant for this single question, run the turn
+        # against it with memoryMode="fresh", and tear it down afterward —
         # zero cross-question contamination. Skipped on the localhost-bypass path.
         tenant_id: str | None = None
         if self._isolate_per_question:
@@ -209,8 +209,7 @@ class UnisonAgentAdapter(AgentAdapter):
                 await self._teardown_tenant(tenant_id)
 
     async def _provision_tenant(self) -> str | None:
-        """Provision a fresh ephemeral eval tenant (ADR-0008). Returns its
-        tenantId, or None on failure."""
+        """Provision a fresh ephemeral eval tenant. Returns its tenantId, or None on failure."""
         assert self._client is not None
         try:
             resp = await self._client.post(

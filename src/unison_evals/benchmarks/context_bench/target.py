@@ -1,7 +1,7 @@
 """Thin HTTP client for Unison's `/api/rest/agents/eval-turn`.
 
 Context-Bench uses a SINGLE fixed corpus (11 files) shared by all 100
-questions, so isolation is **per-run** (ADR-0008), not per-question:
+questions, so isolation is **per-run** (one ephemeral tenant per run), not per-question:
 
   setup()  → provision one ephemeral `is_eval` tenant, seed the corpus
              into /private/sources/eval/context-bench/ once.
@@ -9,7 +9,7 @@ questions, so isolation is **per-run** (ADR-0008), not per-question:
              (no extraction residue between questions; corpus stays put).
   close()  → hard-delete the ephemeral tenant.
 
-No dedicated tenant, no Supabase JWT, no cross-run residue — the secret
+No dedicated tenant, no cross-run residue — the secret
 (`UNISON_EVAL_SECRET`, sent as X-Unison-Eval) is the only auth. On a
 localhost server with UNISON_EVAL_LOCAL_BYPASS the secret is optional.
 """

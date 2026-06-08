@@ -1,9 +1,10 @@
-"""Postgres-direct brain ops for Phase-2 τ-bench smoke.
+"""Direct-Postgres helpers for the τ-bench Mode B runner.
 
-Mode B's translator needs to read brain state after every agent turn and
-wipe state between tasks. Unison has no `/api/rest/brain/*` endpoints yet
-(v2 ask), so we hit Postgres directly. Local-only — the dedicated eval
-tenant is the single namespace.
+LOCAL-ONLY, not part of the public benchmark surface: Mode B needs to read the
+system-under-test's state after each turn and wipe it between tasks, which (for
+the Unison adapter) is done over a direct DB connection to a local dev instance.
+External reproducers use the API-based adapter path instead. Table/column names
+below are the local server's; the reset set is supplied via `UNISON_RESET_TABLES`.
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ from dataclasses import dataclass
 
 import asyncpg
 
-DEFAULT_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+DEFAULT_DSN = os.environ.get(
+    "UNISON_DB_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+)
 
 
 @dataclass(frozen=True)
@@ -32,39 +35,25 @@ async def _connect() -> asyncpg.Connection:
     return await asyncpg.connect(_dsn())
 
 
-# Tenant-scoped tables Memory-v2 + the agent runtime populate during a turn.
-# All must wipe between tasks for iid scoring — leaving any of them lets task
-# N see facts/messages/sessions/jobs accumulated by tasks 1..N-1.
-_TENANT_SCOPED_RESET_TABLES = (
-    # Memory-v2 signal pipeline
-    "cortex_signals",
-    "cortex_facts",
-    "cortex_trajectories",
-    "cortex_conflicts",
-    # Agent runtime state
-    "agent_messages",
-    "agent_events",
-    "agent_input_requests",
-    "agent_sessions",
-    "cortex_runs",
-    "cortex_run_steps",
-    "cortex_escalations",
-    # Background-job queue (kill any pending extract.turn etc.)
-    "cortex_jobs",
-    # Entity graph (re-built from /private/taubench/ on next turn)
-    "cortex_aliases",
-    "cortex_entities",
-    "cortex_links",
-    "cortex_tags",
-    "cortex_sync_state",
-    # Brain content — keep last so FK cascades have already cleared
-    "cortex_documents",
+# Tenant-scoped tables to hard-delete between tasks so scoring stays iid (task N
+# must not see rows accumulated by tasks 1..N-1). This set is specific to the
+# server under test, so it is supplied at runtime via the `UNISON_RESET_TABLES`
+# env var (comma-separated, FK-safe order) rather than hardcoded — point it at
+# your server's tenant-scoped tables. Local-only path; requires direct DB access.
+_TENANT_SCOPED_RESET_TABLES = tuple(
+    t.strip() for t in os.environ.get("UNISON_RESET_TABLES", "").split(",") if t.strip()
 )
 
 
 async def wipe_tenant(tenant_id: str) -> dict[str, int]:
-    """Hard-delete every tenant-scoped row across Memory-v2 + agent tables.
-    Returns {table: rows_deleted}. Used between tasks to reset to iid state."""
+    """Hard-delete every tenant-scoped row for `tenant_id`. Returns
+    {table: rows_deleted}. Used between tasks to reset to iid state. Requires
+    `UNISON_RESET_TABLES` (comma-separated tenant-scoped tables, FK-safe order)."""
+    if not _TENANT_SCOPED_RESET_TABLES:
+        raise RuntimeError(
+            "UNISON_RESET_TABLES is not set — provide a comma-separated list of the "
+            "server's tenant-scoped tables to wipe between tasks (FK-safe order)."
+        )
     conn = await _connect()
     try:
         counts: dict[str, int] = {}

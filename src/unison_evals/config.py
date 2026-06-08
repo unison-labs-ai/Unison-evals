@@ -18,10 +18,10 @@ class Settings(BaseSettings):
     # Unison API
     unison_api_url: str = "http://localhost:3001"
     unison_jwt: str = ""
-    # Secret-gated eval lifecycle (ADR-0008). When set, the unison-agent adapter
-    # sends it as the X-Unison-Eval header and provisions a fresh ephemeral
-    # tenant per question (memory benches) — no Supabase JWT needed. Required to
-    # run reproducible, isolated benchmarks against the deployed (prod) app.
+    # Secret-gated eval lifecycle. When set, the unison-agent adapter sends it as
+    # the X-Unison-Eval header and provisions a fresh ephemeral tenant per question
+    # (memory benches) — no JWT needed. Required to run reproducible, isolated
+    # benchmarks against the deployed (prod) app.
     unison_eval_secret: str = ""
 
     # Anthropic (judge cost accounting)
@@ -36,11 +36,10 @@ class Settings(BaseSettings):
     # Models
     judge_model: str = "claude-opus-4-5-20250101"
     # Unison SUT model override. EMPTY (default) = submit the task with NO model,
-    # so the SERVER runs its production model path (auto → gemini-3-flash-preview
-    # + escalation to gpt-5.4-mini / gemini-3.1-pro) exactly like a live user
-    # turn — the eval must not choose the model (Unison's internal kitchen). Set
-    # a value ONLY for an explicit ablation (e.g. "claude-sonnet-4-5"). Requires
-    # the server fix defaulting eval-turn to "auto" (Unison PR #546) deployed.
+    # so the SERVER runs its production auto model path exactly like a live user
+    # turn — the eval must not choose the model. Set a value ONLY for an explicit
+    # ablation (e.g. "claude-sonnet-4-5"). Requires a server-side fix defaulting
+    # eval-turn to auto model selection deployed.
     unison_agent_model: str = ""
     # Dev/research judge (cheap, on Gemini credits). Used by --dev runs in place
     # of the per-benchmark canonical judge. gemini-3.1-flash-lite: Google's

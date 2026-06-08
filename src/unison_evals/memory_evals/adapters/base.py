@@ -36,8 +36,12 @@ class AgentAdapter(ABC):
         question: str,
         oracle_context: str | None = None,
         seed_docs: list[Document] | None = None,
+        question_id: str | None = None,
     ) -> AdapterResult:
         """Answer one question.
+
+        question_id (optional): the dataset id, used to reuse a pre-ingested
+        persistent tenant from the manifest when one exists.
 
         Args:
             question: The user-facing question text.

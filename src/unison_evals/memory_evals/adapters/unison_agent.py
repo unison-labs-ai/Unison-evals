@@ -8,6 +8,7 @@ provided context only — brain/FS/workspace tools are stripped server-side).
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import time
 from typing import Any
@@ -35,6 +36,7 @@ def _to_writable_seed_path(path: str, ns: str) -> str:
 
 from ...config import get_settings  # noqa: E402
 from ...types import AdapterResult, Document  # noqa: E402
+from ..preingest import load_manifest, tenant_for  # noqa: E402
 from ._url_utils import is_localhost_url  # noqa: E402
 from .base import AgentAdapter  # noqa: E402
 
@@ -51,6 +53,9 @@ class UnisonAgentAdapter(AgentAdapter):
         self.settings = get_settings()
         self._client: httpx.AsyncClient | None = None
         self._isolate_per_question: bool = False
+        # When UNISON_PREINGEST_MANIFEST is set, questions whose id is in the
+        # manifest reuse a persistent pre-ingested tenant (no seed, no teardown).
+        self._manifest: dict[str, Any] | None = None
 
     async def setup(self) -> None:
         is_localhost = is_localhost_url(self.settings.unison_api_url)
@@ -70,6 +75,15 @@ class UnisonAgentAdapter(AgentAdapter):
         # freshly-provisioned ephemeral tenant that is torn down afterward — true
         # per-question isolation, no cross-question retrieval contamination.
         self._isolate_per_question = has_secret
+
+        manifest_path = os.environ.get("UNISON_PREINGEST_MANIFEST")
+        if manifest_path:
+            self._manifest = load_manifest(manifest_path)
+            logger.info(
+                "preingest manifest loaded",
+                path=manifest_path,
+                questions=len(self._manifest.get("questions", {})),
+            )
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if has_jwt:
@@ -96,8 +110,15 @@ class UnisonAgentAdapter(AgentAdapter):
         question: str,
         oracle_context: str | None = None,
         seed_docs: list[Document] | None = None,
+        question_id: str | None = None,
     ) -> AdapterResult:
         assert self._client is not None, "setup() must be called first"
+
+        # Pre-ingested reuse: when this question's haystack was already ingested
+        # into a persistent tenant, query it read-only (no re-seed, no teardown).
+        preingested_tenant: str | None = None
+        if self._manifest is not None and question_id is not None:
+            preingested_tenant = tenant_for(self._manifest, question_id)
 
         if oracle_context is not None and seed_docs is not None:
             return AdapterResult(
@@ -117,7 +138,7 @@ class UnisonAgentAdapter(AgentAdapter):
             body["model"] = self.settings.unison_agent_model
         if oracle_context is not None:
             body["oracleContext"] = oracle_context
-        if seed_docs is not None:
+        if seed_docs is not None and preingested_tenant is None:
             # Per-question namespace so one question's seeded docs don't collide
             # with another's (belt-and-suspenders; the ephemeral tenant already
             # isolates when self._isolate_per_question is on).
@@ -132,13 +153,17 @@ class UnisonAgentAdapter(AgentAdapter):
             # per-question sub-tenant through extract→promote→compact, then answer.
             body["ingestMode"] = self.ingest_mode
 
-        # Provision a throwaway tenant for this single question, run the turn
-        # against it with memoryMode="fresh", and tear it down afterward —
-        # zero cross-question contamination. Skipped on the localhost-bypass path.
-        tenant_id: str | None = None
-        if self._isolate_per_question:
-            tenant_id = await self._provision_tenant()
-            if tenant_id is None:
+        # Tenant selection:
+        #  - pre-ingested → reuse the persistent tenant read-only (no teardown).
+        #  - else isolate_per_question → provision a throwaway tenant + teardown.
+        #  - else → localhost-bypass path (caller's own tenant).
+        provisioned_tenant: str | None = None
+        if preingested_tenant is not None:
+            body["tenantId"] = preingested_tenant
+            body["memoryMode"] = "fresh"
+        elif self._isolate_per_question:
+            provisioned_tenant = await self._provision_tenant()
+            if provisioned_tenant is None:
                 return AdapterResult(
                     answer="",
                     cost_usd=0.0,
@@ -146,7 +171,7 @@ class UnisonAgentAdapter(AgentAdapter):
                     raw={},
                     error="failed to provision ephemeral eval tenant",
                 )
-            body["tenantId"] = tenant_id
+            body["tenantId"] = provisioned_tenant
             body["memoryMode"] = "fresh"
 
         start = time.perf_counter()
@@ -205,8 +230,52 @@ class UnisonAgentAdapter(AgentAdapter):
                 error=f"HTTP error: {e}",
             )
         finally:
-            if tenant_id is not None:
+            # Only tear down tenants WE provisioned for this single question.
+            # Pre-ingested tenants are persistent (reused + analysed later).
+            if provisioned_tenant is not None:
+                await self._teardown_tenant(provisioned_tenant)
+
+    async def preingest_question(
+        self, question: str, seed_docs: list[Document], question_id: str
+    ) -> str | None:
+        """Seed one question's haystack into a NEW persistent tenant and build the
+        full memory graph. Seeds as kind="note" so the server enqueues the real
+        extract jobs; with AGENT_WAIT_GRAPH=1 it drives extract → signals →
+        promote → cortex_facts before returning. Returns the tenant_id and does
+        NOT tear it down — `run` reuses it read-only via the manifest. Used by
+        `unison-evals preingest`."""
+        assert self._client is not None, "setup() must be called first"
+        tenant_id = await self._provision_tenant()
+        if tenant_id is None:
+            return None
+        ns = hashlib.sha256(question.encode()).hexdigest()[:10]
+        body: dict[str, Any] = {
+            "question": question,
+            "tenantId": tenant_id,
+            "memoryMode": "fresh",
+            # kind="note" (not "raw") so the seed enqueues extraction — the
+            # whole point of pre-ingest is to build the fact/observation graph.
+            "seedDocs": [
+                {"path": _to_writable_seed_path(doc.path, ns), "body": doc.body, "kind": "note"}
+                for doc in seed_docs
+            ],
+        }
+        try:
+            resp = await self._client.post("/api/rest/agents/eval-turn", json=body)
+            if resp.status_code != 200:
+                logger.warning(
+                    "preingest seed failed",
+                    question_id=question_id,
+                    status=resp.status_code,
+                    body=resp.text[:300],
+                )
                 await self._teardown_tenant(tenant_id)
+                return None
+            return tenant_id
+        except httpx.HTTPError as e:
+            logger.warning("preingest seed error", question_id=question_id, error=str(e))
+            await self._teardown_tenant(tenant_id)
+            return None
 
     async def _provision_tenant(self) -> str | None:
         """Provision a fresh ephemeral eval tenant. Returns its tenantId, or None on failure."""

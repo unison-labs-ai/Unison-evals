@@ -426,6 +426,77 @@ class _NoOpJudge:
         )
 
 
+@main.command()
+@click.option("--dataset", default="longmemeval", show_default=True, help="Dataset to pre-ingest.")
+@click.option("--limit", default=None, type=int, help="Max questions (omit for the full split).")
+@click.option(
+    "--manifest",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Manifest JSON to write/update (question_id -> persistent tenant_id).",
+)
+@click.option("--system", default="unison-agent", show_default=True)
+def preingest(dataset: str, limit: int | None, manifest: Path, system: str) -> None:
+    """Ingest each question's haystack ONCE into a persistent eval tenant and
+    record question_id -> tenant_id in the manifest. Selection honours the same
+    EVAL_SEED / EVAL_STRATIFIED / EVAL_SPLIT env as `run`. Run the server with
+    AGENT_WAIT_GRAPH=1 so the full extract->promote->facts graph is built.
+
+    Then reuse it read-only + fast:
+      UNISON_PREINGEST_MANIFEST=<manifest> unison-evals run --dataset <dataset> ...
+    Idempotent: re-running skips questions already in the manifest.
+    """
+    asyncio.run(_preingest(dataset, limit, manifest, system))
+
+
+async def _preingest(dataset: str, limit: int | None, manifest_path: Path, system: str) -> None:
+    import os
+
+    from .memory_evals.datasets import get_dataset
+    from .memory_evals.preingest import load_manifest, save_manifest, tenant_for
+
+    if system not in ADAPTER_REGISTRY:
+        raise click.BadParameter(f"Unknown system '{system}'.")
+    ds = get_dataset(dataset)
+    # Track 3 loader: BrainQuestion carries the per-question corpus (.query/.corpus).
+    questions = list(ds.load_brain_questions(limit))
+    adapter = ADAPTER_REGISTRY[system]()
+    await adapter.setup()
+
+    manifest = load_manifest(manifest_path)
+    manifest["meta"].update(
+        {
+            "dataset": dataset,
+            "system": system,
+            "seed": os.environ.get("EVAL_SEED", "1234"),
+            "split": os.environ.get("EVAL_SPLIT", ""),
+            "stratified": os.environ.get("EVAL_STRATIFIED", ""),
+            "embed_model": os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+            "updated": datetime.now(UTC).isoformat(),
+        }
+    )
+
+    done = skipped = failed = 0
+    total = len(questions)
+    for i, q in enumerate(questions, 1):
+        if tenant_for(manifest, q.id):
+            skipped += 1
+            continue
+        tenant = await adapter.preingest_question(q.query, q.corpus, q.id)
+        if tenant:
+            manifest["questions"][q.id] = tenant
+            save_manifest(manifest_path, manifest)  # incremental — crash-safe
+            done += 1
+            console.print(f"[green]OK[/] [{i}/{total}] {q.id} -> {tenant}")
+        else:
+            failed += 1
+            console.print(f"[red]FAIL[/] [{i}/{total}] {q.id} ingest failed")
+    console.print(
+        f"\npre-ingest complete: {done} ingested, {skipped} already present, "
+        f"{failed} failed -> {manifest_path}"
+    )
+
+
 # CLI for SystemSummary type-import linting hygiene
 _SYSTEM_SUMMARY_TYPE: type = SystemSummary
 

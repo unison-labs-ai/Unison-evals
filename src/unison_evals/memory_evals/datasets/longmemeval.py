@@ -16,6 +16,7 @@ distractor sessions are pre-filtered.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Iterable
@@ -49,6 +50,19 @@ def _maybe_stratify(rows: Any, limit: int | None) -> list:
     if cats:
         wanted = {c.strip() for c in cats.split(",") if c.strip()}
         rows = [r for r in rows if str(r.get("question_type") or "?") in wanted]
+    # EVAL_SPLIT=dev|holdout → deterministic 50/50 partition by a stable hash of
+    # question_id. Tune prompts ONLY on `dev`; validate on `holdout` (never inspect
+    # its individual failures). A change that lifts dev but not holdout is overfit.
+    # The hash is category-agnostic, so each split preserves the full category mix.
+    split = os.environ.get("EVAL_SPLIT")
+    if split in ("dev", "holdout"):
+        want_dev = split == "dev"
+        rows = [
+            r
+            for r in rows
+            if (int(hashlib.md5(str(r.get("question_id")).encode()).hexdigest(), 16) % 2 == 0)
+            == want_dev
+        ]
     mode = os.environ.get("EVAL_STRATIFIED")
     if not mode or limit is None:
         return rows

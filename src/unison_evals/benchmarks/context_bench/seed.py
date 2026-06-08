@@ -93,8 +93,8 @@ def _build_pages() -> list[BrainPage]:
 
 def corpus_seed_docs() -> list[dict]:
     """The fixed Context-Bench corpus as eval-turn `seedDocs` entries
-    ({path, body, kind}). Used by the ADR-0008 per-run lifecycle to seed the
-    ephemeral tenant once over the API (no direct DB access)."""
+    ({path, body, kind}). Used by the per-run lifecycle to seed the ephemeral
+    tenant once over the API (no direct DB access)."""
     return [{"path": p.path, "body": p.body_md, "kind": p.kind} for p in _build_pages()]
 
 

@@ -6,7 +6,7 @@ Usage:
 
 Prerequisites:
     - Local Unison API running at $UNISON_API_URL (default http://localhost:3001)
-    - Eval tenant 981825b2-... created with owner-membership for user 4eb0ea0e-...
+    - Eval tenant provisioned (see your Unison server `.env` for UNISON_LOCAL_EVAL_TENANT_ID/USER_ID)
     - UNISON_LOCAL_EVAL_TENANT_ID + USER_ID set in Unison's .env, API restarted
     - OPENAI_API_KEY (user-sim) + ANTHROPIC_API_KEY (agent inside Unison)
 """
@@ -28,8 +28,8 @@ from tau_bench.envs import get_env  # noqa: E402
 
 from .mode_b_agent import UnisonModeBAgent  # noqa: E402
 
-TENANT_ID = "981825b2-33a0-4a0c-8e9b-1d2d671c014f"
-USER_ID = "4eb0ea0e-7d49-492e-a814-a2434be6f5fb"
+TENANT_ID = os.environ.get("UNISON_LOCAL_EVAL_TENANT_ID", "")
+USER_ID = os.environ.get("UNISON_LOCAL_EVAL_USER_ID", "")
 USER_SIM_MODEL = "gpt-4o"
 USER_SIM_PROVIDER = "openai"
 

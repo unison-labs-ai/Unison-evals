@@ -20,7 +20,7 @@ Usage:
     TAUBENCH_AGENT_MODEL=gpt-4o \
         .venv/bin/python -m unison_evals.benchmarks.tau_bench.smoke
 
-Required env (already in ~/IdeaProjects/unison-evals/.env):
+Required env (set in the repo's .env):
     OPENAI_API_KEY     # user simulator + agent if openai-family
     ANTHROPIC_API_KEY  # agent if claude-family
 """

@@ -77,7 +77,7 @@ Useful flags either runner accepts:
 | `--model claude-sonnet-4-6` | Override agent model (provider auto-derived for claude-* / gpt-* / gemini-*) |
 | `--provider anthropic` | Force litellm provider |
 
-Mode B also needs Unison running locally with the eval tenant configured (see `~/IdeaProjects/Unison/.env`'s `UNISON_LOCAL_EVAL_TENANT_ID` / `UNISON_LOCAL_EVAL_USER_ID`).
+Mode B also needs Unison running locally with the eval tenant configured (see `<path-to-your-unison-server>/.env`'s `UNISON_LOCAL_EVAL_TENANT_ID` / `UNISON_LOCAL_EVAL_USER_ID`).
 
 ## Where results land
 

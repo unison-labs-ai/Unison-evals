@@ -87,7 +87,7 @@ def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
     from datetime import datetime
 
     return {
-        "isolation": "per-run ephemeral tenant (ADR-0008)",
+        "isolation": "per-run ephemeral tenant",
         "evals_commit": _git_sha(_REPO_ROOT),
         "letta_evals_submodule": _submodule_sha(_REPO_ROOT, "vendor/letta-evals"),
         "dataset": "vendor/letta-evals/.../filesystem_cloud.jsonl",
@@ -145,9 +145,9 @@ def run_context_bench(
     total_score = 0.0
     total_cost = 0.0
 
-    # ADR-0008 per-run isolation: provision one ephemeral tenant + seed the
-    # fixed corpus once. Guaranteed teardown in `finally` so a crash mid-run
-    # never leaks the tenant.
+    # Per-run isolation: provision one ephemeral tenant + seed the fixed corpus
+    # once. Guaranteed teardown in `finally` so a crash mid-run never leaks the
+    # tenant.
     try:
         target.setup()
     except Exception as e:

@@ -310,7 +310,7 @@ export default function NewRunPage() {
                 {brainModes.find((m) => m.name === brainMode)?.description}
                 {brainMode === "compaction" && (
                   <span className="ml-1 text-yellow-400">
-                    (requires /api/rest/agents/eval-wiki endpoint)
+                    (requires the Unison compaction endpoint)
                   </span>
                 )}
               </p>

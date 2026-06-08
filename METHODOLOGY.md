@@ -334,7 +334,7 @@ you're benchmarking.
 
 ```bash
 # 1. Clone
-git clone https://github.com/Unison-Workspace/Unison-evals.git
+git clone https://github.com/unison-labs-ai/Unison-evals.git
 cd Unison-evals
 
 # 2. Install
@@ -471,7 +471,7 @@ If you use unison-evals in research or a product comparison, please cite:
   title     = {unison-evals: A Benchmark Harness for Memory and Workspace Agents},
   author    = {{Unison}},
   year      = {2026},
-  url       = {https://github.com/Unison-Workspace/Unison-evals},
+  url       = {https://github.com/unison-labs-ai/Unison-evals},
   license   = {Apache-2.0},
   version   = {0.1.0}
 }

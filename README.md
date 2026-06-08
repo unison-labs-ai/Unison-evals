@@ -1,10 +1,10 @@
 # unison-evals
 
-[![CI](https://github.com/Unison-Workspace/Unison-evals/actions/workflows/ci.yml/badge.svg)](https://github.com/Unison-Workspace/Unison-evals/actions/workflows/ci.yml)
+[![CI](https://github.com/unison-labs-ai/Unison-evals/actions/workflows/ci.yml/badge.svg)](https://github.com/unison-labs-ai/Unison-evals/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 
-Public benchmark harness for [Unison](https://github.com/Unison-Workspace/unison-brain) and comparable agent / memory systems.
+Public benchmark harness for [Unison](https://github.com/unison-labs-ai/unison-brain) and comparable agent / memory systems.
 
 Treats the production agent as a black box: every system implements one adapter (~80 LOC), points at its API/CLI, and is scored on the same datasets with the same metrics under the same constraints.
 
@@ -100,7 +100,7 @@ Additional comparator adapters can be added via the adapter interface — see [A
 
 ```bash
 # 1. Clone + install
-git clone https://github.com/Unison-Workspace/Unison-evals.git
+git clone https://github.com/unison-labs-ai/Unison-evals.git
 cd Unison-evals
 uv sync                                   # uses .python-version (3.12)
 
@@ -108,7 +108,7 @@ uv sync                                   # uses .python-version (3.12)
 cp .env.example .env
 $EDITOR .env                              # set UNISON_JWT, ANTHROPIC_API_KEY
 # To run the `unison-agent` system, you need a Unison brain server — get the
-# open-source server + clients at https://github.com/Unison-Workspace/unison-brain
+# open-source server + clients at https://github.com/unison-labs-ai/unison-brain
 # Tip: when running against a local Unison server, leave UNISON_JWT blank and set
 # UNISON_LOCAL_EVAL_TENANT_ID in the brain server's .env — no JWT needed.
 

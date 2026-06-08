@@ -23,10 +23,12 @@ from dotenv import load_dotenv
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 load_dotenv(_REPO_ROOT / ".env")
 
-from . import judge  # noqa: E402
-from .target import UnisonContextBenchTarget  # noqa: E402
+from datetime import UTC  # noqa: E402
+
 from ...config import get_settings  # noqa: E402
 from ...results import new_run_id, results_path  # noqa: E402
+from . import judge  # noqa: E402
+from .target import UnisonContextBenchTarget  # noqa: E402
 
 DATASET_PATH = (
     _REPO_ROOT
@@ -82,7 +84,7 @@ def _submodule_sha(path: Path, sub: str) -> str | None:
 def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
     """Reproducibility manifest — pinned to the run so a published number can be
     reproduced and audited (commit SHAs, models, dataset revision, isolation)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     return {
         "isolation": "per-run ephemeral tenant (ADR-0008)",
@@ -94,7 +96,7 @@ def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
         "memory_mode": "fresh",
         "unison_api_url": os.environ.get("UNISON_API_URL", "http://localhost:3001"),
         "ephemeral_tenant_id": tenant_id,
-        "run_utc": datetime.now(timezone.utc).isoformat(),
+        "run_utc": datetime.now(UTC).isoformat(),
     }
 
 
@@ -152,7 +154,9 @@ def run_context_bench(
         target.close()
         raise RuntimeError(f"provision/seed failed: {e}") from e
     ran_tenant_id = target.tenant_id  # capture before close() nulls it
-    print(f"  Tenant:      {ran_tenant_id} (ephemeral, is_eval) — seeded {target.seeded_pages} pages")
+    print(
+        f"  Tenant:      {ran_tenant_id} (ephemeral, is_eval) — seeded {target.seeded_pages} pages"
+    )
     print()
 
     try:
@@ -239,19 +243,10 @@ def run_context_bench(
         "task_ids": task_ids,
         "results": results,
         "manifest": _manifest(model_label, judge_label, ran_tenant_id),
-        # leaderboard.letta.com, Filesystem suite, as of 2026-03-13. Same dataset,
-        # same gpt-5-mini judge + rubric — only the agent interface differs.
-        "comparator_cells": {
-            "letta_agent_gpt_5_2_codex": 0.93,
-            "letta_agent_gpt_5_4": 0.89,
-            "letta_agent_sonnet_4_6": 0.88,
-        },
     }
     out_path.write_text(json.dumps(summary, indent=2))
     print("─── Summary ──────────────────────────────────────────")
-    print(f"  Unison cell ({model_label}):   {total_score:.1f}/{n} = {pct:.1f}%")
-    print("  Letta cell (Sonnet 4.6): 88.0%  (leaderboard.letta.com, 2026-03-13)")
-    print(f"  Δ vs Letta Sonnet 4.6:   {pct - 88.0:+.1f}pp  (top model GPT-5.2-codex: 93%)")
-    print(f"  Total agent cost:        ${total_cost:.3f}")
-    print(f"  Written:                 {out_path}")
+    print(f"  Score:             {total_score:.1f}/{n} = {pct:.1f}%")
+    print(f"  Total agent cost:  ${total_cost:.3f}")
+    print(f"  Written:           {out_path}")
     return summary

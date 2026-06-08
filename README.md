@@ -73,6 +73,42 @@ uv run unison-evals run \
   --limit 25
 ```
 
+## Results — LongMemEval (Track 3, agentic end-to-end)
+
+**Methodology.** Split: `longmemeval_s_cleaned` — full ~50-session haystacks **with distractors** (the hard split Zep/Mem0 report on, not the `oracle` split). Track 3 = ingest → **multi-step agent** retrieves + reasons + answers. This is **end-to-end answer accuracy**, *not* retrieval recall@k and *not* single-pass QA — a strictly harder metric. Sampling: category-weighted proportional (`EVAL_STRATIFIED=proportional`), so `n=150` mirrors the full 500-set category mix. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
+
+**`unison-agent`** (Gemini `auto` tier: flash base, escalates to Gemini-3.1-pro / GPT-5.4-mini on hard/error turns), **~$0.02–0.03 / question**:
+
+| Weighted run (seed) | Overall (n=150) |
+|---|---|
+| 1234 | 90.0% |
+| 5678 | 91.3% |
+| 9012 | 86.0% |
+| **mean** | **89.1%** |
+
+Per-category (representative weighted run, n=150):
+
+| Category | Accuracy |
+|---|---|
+| multi-session | 90.0% |
+| temporal-reasoning | 90.0% |
+| knowledge-update | 91.3% |
+| single-session-assistant | 100% |
+| single-session-user | 81–100% (high variance, n≈21) |
+| single-session-preference | 86–89% |
+
+Reproduce:
+
+```bash
+EVAL_STRATIFIED=proportional EVAL_SEED=1234 \
+  uv run unison-evals run --dataset longmemeval --systems unison-agent --limit 150 --dev
+```
+
+**Caveats — read before citing.**
+- **Dev judge.** These numbers use `gemini-3.1-flash-lite`, *not* `gpt-4o`. The publishable, cross-system-comparable number requires the gpt-4o judge (`JUDGE_MODEL=gpt-4o-2024-08-06`); it can move the score in either direction.
+- **Variance.** Run-to-run decoding variance is ±2–3pp even at n=150 (the `auto` tier samples non-deterministically). Per-category cells at n≈20–40 swing ±10–18pp — treat the **weighted overall**, not individual cells, as the signal.
+- **No benchmark contamination.** Prompts contain only general principles, not question-specific exemplars; a locked `EVAL_SPLIT=dev|holdout` partition guards against overfitting (tune on `dev`, validate on `holdout`).
+
 ## Quickstart
 
 ```bash

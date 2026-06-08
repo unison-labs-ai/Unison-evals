@@ -16,7 +16,9 @@ distractor sessions are pre-filtered.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -37,6 +39,79 @@ HF_DATASET = "xiaowu0162/longmemeval-cleaned"
 DEFAULT_SPLIT = "longmemeval_oracle"
 
 
+def _maybe_stratify(rows: Any, limit: int | None) -> list:
+    """When EVAL_STRATIFIED is set + a limit is given, round-robin rows across
+    `question_type` so a small dev sample covers every category instead of the
+    first contiguous block (the dataset is grouped by type). No-op otherwise."""
+    rows = list(rows)
+    # EVAL_CATEGORY=<question_type[,question_type...]> → keep only those categories
+    # (isolates one weak category for low-noise before/after measurement).
+    cats = os.environ.get("EVAL_CATEGORY")
+    if cats:
+        wanted = {c.strip() for c in cats.split(",") if c.strip()}
+        rows = [r for r in rows if str(r.get("question_type") or "?") in wanted]
+    # EVAL_SPLIT=dev|holdout → deterministic 50/50 partition by a stable hash of
+    # question_id. Tune prompts ONLY on `dev`; validate on `holdout` (never inspect
+    # its individual failures). A change that lifts dev but not holdout is overfit.
+    # The hash is category-agnostic, so each split preserves the full category mix.
+    split = os.environ.get("EVAL_SPLIT")
+    if split in ("dev", "holdout"):
+        want_dev = split == "dev"
+        rows = [
+            r
+            for r in rows
+            if (int(hashlib.md5(str(r.get("question_id")).encode()).hexdigest(), 16) % 2 == 0)
+            == want_dev
+        ]
+    mode = os.environ.get("EVAL_STRATIFIED")
+    if not mode or limit is None:
+        return rows
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(str(r.get("question_type") or "?"), []).append(r)
+    keys = list(groups.keys())
+
+    # proportional: sample each category at its real share of the full set, so a
+    # dev sample of `limit` mirrors the 500-set category mix (weighted overall).
+    # Largest-remainder apportionment makes the per-category counts sum to exactly
+    # `limit`; sampling within a category is seeded for reproducibility.
+    if mode == "proportional":
+        import random
+
+        total = sum(len(groups[k]) for k in keys)
+        rng = random.Random(int(os.environ.get("EVAL_SEED", "1234")))
+        raw = {k: limit * len(groups[k]) / total for k in keys}
+        base = {k: int(raw[k]) for k in keys}
+        remainder = limit - sum(base.values())
+        # hand out the leftover slots to the largest fractional parts
+        for k in sorted(keys, key=lambda k: raw[k] - base[k], reverse=True)[:remainder]:
+            base[k] += 1
+        picked: list = []
+        for k in keys:
+            pool = list(groups[k])
+            rng.shuffle(pool)
+            picked.extend(pool[: base[k]])
+        rng.shuffle(picked)
+        return picked
+
+    # default ("round-robin" / any truthy value): equal coverage across categories.
+    ordered: list = []
+    while any(groups[k] for k in keys):
+        for k in keys:
+            if groups[k]:
+                ordered.append(groups[k].pop(0))
+    return ordered
+
+
+def _with_question_date(row: dict, question: str) -> str:
+    """Prepend the canonical question_date as the agent's "now" — required for
+    temporal questions ("how long ago / how many weeks since"). No-op if absent."""
+    qd = row.get("question_date")
+    if qd:
+        return f"Today's date is {qd}.\n\n{question}"
+    return question
+
+
 class LongMemEvalDataset(Dataset):
     name = "longmemeval"
     description = (
@@ -48,11 +123,15 @@ class LongMemEvalDataset(Dataset):
     supported_tracks = frozenset({Track.AGENT_ORACLE, Track.AGENT_E2E, Track.BRAIN_ONLY})
 
     def __init__(self, split: str = DEFAULT_SPLIT) -> None:
-        self.split = split
+        # Env override so the E2E/full-benchmark run can use the real
+        # `longmemeval_s_cleaned` split (full 50+-session haystacks WITH
+        # distractors) instead of the distractor-stripped `oracle` split.
+        # Publishable comparisons MUST be on s_cleaned (what Quarq/Zep report).
+        self.split = os.environ.get("LONGMEMEVAL_SPLIT", split)
         self.settings = get_settings()
 
     def load(self, limit: int | None = None) -> Iterable[Question]:
-        rows = self._load_raw_rows()
+        rows = _maybe_stratify(self._load_raw_rows(), limit)
         for i, row in enumerate(rows):
             if limit is not None and i >= limit:
                 return
@@ -67,7 +146,7 @@ class LongMemEvalDataset(Dataset):
         ``answer_session_ids`` is missing or empty, gold_doc_paths is an empty
         set (the question is treated as unanswerable for retrieval scoring).
         """
-        rows = self._load_raw_rows()
+        rows = _maybe_stratify(self._load_raw_rows(), limit)
         for i, row in enumerate(rows):
             if limit is not None and i >= limit:
                 return
@@ -85,7 +164,11 @@ class LongMemEvalDataset(Dataset):
         or direct string matching when they are explicit session ID strings.
         """
         qid = str(row.get("question_id") or row.get("id") or row.get("qid") or _stable_id(row))
-        query = str(row.get("question") or row.get("query") or "")
+        # LongMemEval's canonical eval gives the model the question_date as "now"
+        # — temporal questions ("how long ago") are unanswerable without it. Omitting
+        # it made the agent compute intervals from its own training-era date. Prepend
+        # it so retrieval/reasoning anchor on the conversation's reference time.
+        query = _with_question_date(row, str(row.get("question") or row.get("query") or ""))
         haystack: list = row.get("haystack_sessions") or row.get("sessions") or []
         dates: list = row.get("haystack_dates") or [None] * len(haystack)
         session_ids: list | None = row.get("haystack_session_ids")
@@ -164,7 +247,7 @@ class LongMemEvalDataset(Dataset):
           - answer_session_ids: list[str]
         """
         qid = str(row.get("question_id") or row.get("id") or row.get("qid") or _stable_id(row))
-        question = str(row.get("question") or row.get("query") or "")
+        question = _with_question_date(row, str(row.get("question") or row.get("query") or ""))
         expected = str(row.get("answer") or row.get("expected_answer") or "")
         haystack = row.get("haystack_sessions") or row.get("sessions") or []
         dates = row.get("haystack_dates") or [None] * len(haystack)

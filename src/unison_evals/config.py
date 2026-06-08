@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     dev_judge_model: str = "gemini-3.1-flash-lite"
 
     # Timeouts (seconds)
-    # 600s ceiling so MemoryAgentBench's long-context tiers (197K–1M tokens,
+    # 600s ceiling so MemoryAgentBench's long-context tiers (197K-1M tokens,
     # which exceed 120s) just work. It's a ceiling, not a target — fast benches
     # still return in seconds.
     adapter_timeout: int = 600

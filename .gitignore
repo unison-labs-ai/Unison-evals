@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.uv-cache/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# Local data
+results/*.json
+results/*.parquet
+results/*.db
+.cache/
+~/.cache/
+data-cache/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Editor
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Misc
+.aider*
+*.log
+
+# git worktrees used for parallel subagent work
+.worktrees/
+.serena/
+results/tau-bench/
+results/

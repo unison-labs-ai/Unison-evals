@@ -1,0 +1,41 @@
+# One-command local dev. Prereqs:
+#   - .env with UNISON_JWT, ANTHROPIC_API_KEY
+#   - Unison API running locally on host (http://host.docker.internal:3001)
+#
+# Run:
+#   docker compose up
+# Then open http://localhost:3000
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8001:8001"
+    environment:
+      UNISON_API_URL: ${UNISON_API_URL:-http://host.docker.internal:3001}
+      UNISON_JWT: ${UNISON_JWT}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      JUDGE_MODEL: ${JUDGE_MODEL:-claude-haiku-4-5}
+    volumes:
+      - ./results:/app/results
+      - hf-cache:/root/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web:
+    image: oven/bun:1
+    working_dir: /app
+    volumes:
+      - ./web:/app
+    command: sh -c "bun install && bun run dev"
+    environment:
+      UNISON_EVALS_API: http://server:8001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+
+volumes:
+  hf-cache:

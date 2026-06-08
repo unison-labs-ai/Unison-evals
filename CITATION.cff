@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+title: "unison-evals: A Benchmark Harness for Memory and Workspace Agents"
+message: "If you use unison-evals in research or a product comparison, please cite it."
+type: software
+authors:
+  - name: "Unison"
+repository-code: "https://github.com/Unison-Workspace/Unison-evals"
+url: "https://unisonlabs.ai"
+license: Apache-2.0
+version: "0.1.0"
+date-released: "2026-05-23"

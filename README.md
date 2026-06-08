@@ -76,36 +76,38 @@ uv run unison-evals run \
 
 **Methodology.** Split: `longmemeval_s_cleaned` — full ~50-session haystacks **with distractors** (the hard split Zep/Mem0 report on, not the `oracle` split). Track 3 = ingest → **multi-step agent** retrieves + reasons + answers. This is **end-to-end answer accuracy**, *not* retrieval recall@k and *not* single-pass QA — a strictly harder metric. Sampling: category-weighted proportional (`EVAL_STRATIFIED=proportional`), so `n=150` mirrors the full 500-set category mix. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
 
-**`unison-agent`** (configured model via the Unison server's auto-routing; see the Unison server for model details), **~$0.02–0.03 / question**:
+**`unison-agent`** (configured model via the Unison server's auto-routing; see the Unison server for model details), **~$0.02–0.03 / question**. Pooled across **3 weighted runs** (seeds 1234 / 5678 / 9012 — different question samples), **n = 450 judgments**:
 
-| Weighted run (seed) | Overall (n=150) |
+| Metric | Result |
 |---|---|
-| 1234 | 90.0% |
-| 5678 | 91.3% |
-| 9012 | 86.0% |
-| **mean** | **89.1%** |
+| **Overall** (pooled, n=450) | **89.1%** |
+| Per-run spread (n=150 each) | 86.0% · 90.0% · 91.3% |
 
-Per-category (representative weighted run, n=150):
+Per-category (pooled across all 3 runs, so cells are stable):
 
-| Category | Accuracy |
-|---|---|
-| multi-session | 90.0% |
-| temporal-reasoning | 90.0% |
-| knowledge-update | 91.3% |
-| single-session-assistant | 100% |
-| single-session-user | 81–100% (high variance, n≈21) |
-| single-session-preference | 86–89% |
+| Category | Accuracy | n |
+|---|---|---|
+| single-session-assistant | 96.1% | 51 |
+| knowledge-update | 92.8% | 69 |
+| single-session-user | 92.1% | 63 |
+| multi-session | 89.2% | 120 |
+| single-session-preference | 88.9% | 27 |
+| temporal-reasoning | 82.5% | 120 |
 
-Reproduce:
+**Reproducing `unison-agent`.** The harness is open source, but `unison-agent` runs against a Unison brain server that is **authenticated and not publicly hosted** — so you cannot reproduce *its* numbers without access. Request an eval access token by emailing **misha@unisonlabs.ai** (briefly state your use case), then point the harness at the provided server:
 
 ```bash
+export UNISON_API_URL=...        # provided with your token
+export UNISON_EVAL_SECRET=...    # your eval access token
 EVAL_STRATIFIED=proportional EVAL_SEED=1234 \
   uv run unison-evals run --dataset longmemeval --systems unison-agent --limit 150 --dev
 ```
 
+All other systems (`mem0-agent`, the raw-model baselines, and the CLI agents) are fully reproducible with **your own provider API keys** — only `unison-agent` needs the token.
+
 **Caveats — read before citing.**
 - **Dev judge.** These numbers use `gemini-3.1-flash-lite`, *not* `gpt-4o`. The publishable, cross-system-comparable number requires the gpt-4o judge (`JUDGE_MODEL=gpt-4o-2024-08-06`); it can move the score in either direction.
-- **Variance.** Run-to-run decoding variance is ±2–3pp even at n=150 (the `auto` tier samples non-deterministically). Per-category cells at n≈20–40 swing ±10–18pp — treat the **weighted overall**, not individual cells, as the signal.
+- **Variance.** Run-to-run decoding variance is ±2–3pp even at n=150 (the `auto` tier samples non-deterministically) — hence the per-run spread above and the pooling of 3 runs into n=450 for the reported figures.
 - **No benchmark contamination.** Prompts contain only general principles, not question-specific exemplars; a locked `EVAL_SPLIT=dev|holdout` partition guards against overfitting (tune on `dev`, validate on `holdout`).
 
 ## Quickstart
@@ -170,7 +172,7 @@ Fill in `reports/template.md` with the headline numbers for a shareable report.
 
 ## How the comparison stays honest
 
-- **No agent fork.** `unison-agent` adapter calls the same `/api/rest/agents/eval-turn` endpoint that ships in production. Track 3 is bit-for-bit the production agent. Track 2 uses the same agent with the brain/FS/workspace tools disabled (via the `oracleContext` knob in the eval-turn request).
+- **Same production agent loop.** The `unison-agent` adapter calls the `/api/rest/agents/eval-turn` endpoint, which runs the **same `runAgent` loop that ships in production** — retrieve → reason → answer, including the counting-verification gate (no eval-only forks in the answer path). Track 2 disables the brain/FS/workspace tools via the `oracleContext` request flag. *One honest caveat:* the eval seeds each question's brain **synchronously** (`extractFromDocument → recordFact`), which runs the same extraction logic as production but **skips the asynchronous production ingestion pipeline** (the signal notability gate, reconcile, and compaction). So the *answering* path is production; the *brain-building* path is a faster eval-time shortcut over identical extraction.
 - **Fixed model + temperature.** Judge model pinned per release (`JUDGE_MODEL` env var). All systems use temperature=0 where possible.
 - **Fixed dataset versions.** Datasets are downloaded from HuggingFace at a pinned commit hash and cached locally.
 - **All numbers reproducible.** Every run writes a JSON artifact with the exact dataset hash, model versions, timestamps, and per-question scores. Re-running the same config on the same hardware gets within ±2%.

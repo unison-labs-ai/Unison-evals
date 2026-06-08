@@ -23,7 +23,7 @@ def test_is_localhost_url_true_cases() -> None:
 
 
 def test_is_localhost_url_false_cases() -> None:
-    assert not is_localhost_url("https://api.eval.unison.ai")
+    assert not is_localhost_url("https://api.example.com")
     assert not is_localhost_url("https://example.com")
     assert not is_localhost_url("")
 
@@ -57,7 +57,7 @@ async def test_setup_fails_remote_no_jwt(monkeypatch) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "unison_jwt", "")
     monkeypatch.setattr(settings, "unison_eval_secret", "")
-    monkeypatch.setattr(settings, "unison_api_url", "https://api.eval.unison.ai")
+    monkeypatch.setattr(settings, "unison_api_url", "https://api.example.com")
 
     adapter = UnisonAgentAdapter()
     with pytest.raises(RuntimeError, match="Neither UNISON_EVAL_SECRET nor UNISON_JWT"):

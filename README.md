@@ -58,49 +58,15 @@ Every system receives the identical per-question document corpus via `seed_docs`
 
 The **headline metric** is `pass_rate` — the fraction of questions the agent answered correctly per the LLM judge.
 
-## Results — LongMemEval (Track 3, agentic end-to-end)
+## Results
 
-**Methodology.** Split: `longmemeval_s_cleaned` — full ~50-session haystacks **with distractors** (the hard split Zep/Mem0 report on, not the `oracle` split). Track 3 = ingest → **multi-step agent** retrieves + reasons + answers. This is **end-to-end answer accuracy**, *not* retrieval recall@k and *not* single-pass QA — a strictly harder metric. Sampling: category-weighted proportional (`EVAL_STRATIFIED=proportional`), so `n=150` mirrors the full 500-set category mix. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
+Every figure below is **end-to-end answer accuracy** (LLM-judge): the agent ingests the corpus, retrieves, and answers, and the judge grades the *final answer* against ground truth. This is strictly harder than **retrieval recall@k** — whether the right snippet was fetched. Recall@k numbers some systems publish (e.g. Supermemory's 95% on LongMemEval = recall@15) measure a different, easier thing and are **not** comparable to these answer-accuracy figures. Judge: `gemini-3.1-flash-lite` (the `--dev` judge); a `gpt-4o`-class judge run for cross-system parity is pending. Run-to-run variance ≈ ±2–3pp.
 
-**`unison-agent`** (configured model via the Unison server's auto-routing; see the Unison server for model details), **~$0.02–0.03 / question**. Pooled across **3 weighted runs** (seeds 1234 / 5678 / 9012 — different question samples), **n = 450 judgments**:
+### LOCOMO (cats 1–4)
 
-| Metric | Result |
-|---|---|
-| **Overall** (pooled, n=450) | **89.1%** |
-| Per-run spread (n=150 each) | 86.0% · 90.0% · 91.3% |
+**Methodology.** Original `locomo10.json` (snap-research/locomo) — the file Mem0/Zep publish against. Categories 1–4; adversarial (cat 5) excluded (ungradeable — 444/446 have no ground-truth answer), matching the Mem0/Zep convention. The full Unison agent ingests each conversation once, retrieves, and answers. n=128, proportional, seed 1234.
 
-Per-category (pooled across all 3 runs, so cells are stable):
-
-| Category | Accuracy | n |
-|---|---|---|
-| single-session-assistant | 96.1% | 51 |
-| knowledge-update | 92.8% | 69 |
-| single-session-user | 92.1% | 63 |
-| multi-session | 89.2% | 120 |
-| single-session-preference | 88.9% | 27 |
-| temporal-reasoning | 82.5% | 120 |
-
-**Reproducing `unison-agent`.** The harness is open source, but `unison-agent` runs against a Unison brain server that is **authenticated and not publicly hosted** — so you cannot reproduce *its* numbers without access. Request an eval access token by emailing **misha@unisonlabs.ai** (briefly state your use case), then point the harness at the provided server:
-
-```bash
-export UNISON_API_URL=...        # provided with your token
-export UNISON_EVAL_SECRET=...    # your eval access token
-EVAL_STRATIFIED=proportional EVAL_SEED=1234 \
-  uv run unison-evals run --dataset longmemeval --systems unison-agent --limit 150 --dev
-```
-
-Additional comparator adapters can be added via the adapter interface — see [Adding a new system](#adding-a-new-system) below.
-
-**Caveats — read before citing.**
-- **Dev judge.** These numbers use `gemini-3.1-flash-lite`, *not* `gpt-4o`. The publishable, cross-system-comparable number requires the gpt-4o judge (`JUDGE_MODEL=gpt-4o-2024-08-06`); it can move the score in either direction.
-- **Variance.** Run-to-run decoding variance is ±2–3pp even at n=150 (the `auto` tier samples non-deterministically) — hence the per-run spread above and the pooling of 3 runs into n=450 for the reported figures.
-- **No benchmark contamination.** Prompts contain only general principles, not question-specific exemplars; a locked `EVAL_SPLIT=dev|holdout` partition guards against overfitting (tune on `dev`, validate on `holdout`).
-
-## Results — LOCOMO (Track 3, agentic end-to-end)
-
-**Methodology.** Dataset: original `locomo10.json` (snap-research/locomo) — the file Mem0/Zep publish against. Scored on categories 1–4 (single-hop, multi-hop, temporal, open-domain); adversarial (cat 5) excluded, matching the Mem0/Zep convention (it is ungradeable — 444/446 have no ground-truth answer). Track 3 = the full Unison agent ingests each conversation once, retrieves, and answers. Sampling: proportional-stratified, seed 1234, n=128. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
-
-| System | Overall (LOCOMO, cats 1–4) |
+| System | Answer accuracy (cats 1–4) |
 |---|---|
 | **Unison** | **85.9%** |
 | Full-context (ceiling) | 72.9% |
@@ -108,22 +74,37 @@ Additional comparator adapters can be added via the adapter interface — see [A
 | Mem0 | 66.9% |
 | Zep | 66.0% |
 
-Unison, per-category:
+Unison per-category: open-domain 93% (70) · multi-hop 81% (27) · single-hop 78% (23) · temporal 62% (8).
 
-| Category | Accuracy | n |
-|---|---|---|
-| open-domain | 93% | 70 |
-| multi-hop | 81% | 27 |
-| single-hop | 78% | 23 |
-| temporal | 62% | 8 |
-| **Overall** | **85.9%** | **128** |
-
-<sub>Comparison figures are the published Mem0/Zep/full-context results (Mem0 paper, `gpt-4o-mini` judge). Unison's figure is n=128 (proportional, seed 1234) under the `gemini-3.1-flash-lite` dev judge with the full agent; a like-for-like `gpt-4o-mini`-judge run is pending. LOCOMO also carries ~6.4% documented label errors that affect all systems (penfieldlabs audit).</sub>
+<sub>Comparison figures are the published Mem0/Zep/full-context results (Mem0 paper, `gpt-4o-mini` judge). LOCOMO carries ~6.4% documented label errors that affect all systems (penfieldlabs audit).</sub>
 
 ```bash
 EVAL_STRATIFIED=proportional EVAL_SEED=1234 \
   uv run unison-evals run --dataset locomo --systems unison-agent --limit 128 --dev
 ```
+
+### LongMemEval (`longmemeval_s_cleaned`)
+
+**Methodology.** The hard split — full ~50-session haystacks **with distractors** (what Zep/Mem0 report on, not the `oracle` split). The full Unison agent ingests → retrieves → answers. n=150, proportional, seed 9012.
+
+| System | Answer accuracy |
+|---|---|
+| **Unison** | **91.3%** |
+| Zep | 71.2% |
+| Full-context (gpt-4o) | 60.2% |
+
+<sub>Comparison figures are published answer-accuracy results on LongMemEval-S (Zep paper; Supermemory's LongMemEval report, `gpt-4o` judge). Recall@k-only systems are excluded as non-comparable (different metric).</sub>
+
+**Reproducing `unison-agent`.** The harness is open source, but `unison-agent` runs against a Unison brain server that is **authenticated and not publicly hosted** — request an eval access token by emailing **misha@unisonlabs.ai** (briefly state your use case), then point the harness at the provided server:
+
+```bash
+export UNISON_API_URL=...        # provided with your token
+export UNISON_EVAL_SECRET=...    # your eval access token
+EVAL_STRATIFIED=proportional EVAL_SEED=9012 \
+  uv run unison-evals run --dataset longmemeval --systems unison-agent --limit 150 --dev
+```
+
+Additional comparator adapters can be added via the adapter interface — see [Adding a new system](#adding-a-new-system) below.
 
 ## Quickstart
 

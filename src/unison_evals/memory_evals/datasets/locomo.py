@@ -43,13 +43,20 @@ LOCOMO_URL = os.environ.get(
 
 # LOCOMO numeric category → readable question_type (the key the shared sampler
 # stratifies / splits on, matching how LongMemEval uses question_type).
+# Verified against locomo10.json counts (1:282, 2:321, 3:96, 4:841, 5:446) which
+# match the published distribution single-hop/multi-hop/temporal/world-knowledge/
+# adversarial. Category 5 (adversarial) = unanswerable (444/446 null answers).
 CATEGORY_NAMES = {
-    1: "multi-hop",
-    2: "temporal",
-    3: "open-domain",
-    4: "single-hop",
+    1: "single-hop",
+    2: "multi-hop",
+    3: "temporal",
+    4: "open-domain",
     5: "adversarial",
 }
+# Adversarial (cat 5) has no gradeable ground truth; the field convention
+# (Mem0/Zep/papers) is to EXCLUDE it from scoring. Excluded by default; set
+# LOCOMO_INCLUDE_ADVERSARIAL=1 to include (e.g. to measure abstention).
+ADVERSARIAL_CATEGORY = 5
 
 
 def _cache_path() -> Path:
@@ -182,8 +189,13 @@ class LocomoDataset(Dataset):
                     if did:
                         dia_to_session[str(did)] = sid
             sample_key = str(sample.get("sample_id") or s_idx)
+            include_adv = bool(os.environ.get("LOCOMO_INCLUDE_ADVERSARIAL"))
             for q_idx, qa in enumerate(sample.get("qa") or []):
                 cat = qa.get("category")
+                # Exclude adversarial (cat 5) by default — ungradeable, and the
+                # field convention excludes it. q_idx stays stable (gaps are fine).
+                if cat == ADVERSARIAL_CATEGORY and not include_adv:
+                    continue
                 answer = qa.get("answer")
                 if answer is None:
                     answer = qa.get("adversarial_answer")  # category 5

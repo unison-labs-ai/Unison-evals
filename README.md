@@ -60,40 +60,34 @@ The **headline metric** is `pass_rate` — the fraction of questions the agent a
 
 ## Results
 
-Every figure below is **end-to-end answer accuracy** (LLM-judge): the agent ingests the corpus, retrieves, and answers, and the judge grades the *final answer* against ground truth. This is strictly harder than **retrieval recall@k** — whether the right snippet was fetched. Recall@k numbers some systems publish (e.g. Supermemory's 95% on LongMemEval = recall@15) measure a different, easier thing and are **not** comparable to these answer-accuracy figures. Judge: `gemini-3.1-flash-lite` (the `--dev` judge); a `gpt-4o`-class judge run for cross-system parity is pending. Run-to-run variance ≈ ±2–3pp.
+These are **end-to-end answer accuracy** numbers (LLM-judge): the agent ingests the corpus, retrieves, and answers, and the judge grades the *final answer* against ground truth. That's the hard metric — *not* retrieval **recall@k** (whether the right snippet was fetched). A recall@k number is not comparable to answer accuracy: you can retrieve the right passage and still answer wrong. Judge: `gemini-3.1-flash-lite` (the `--dev` judge); run-to-run variance ≈ ±2–3pp.
 
-### LOCOMO (cats 1–4)
+### LOCOMO
 
-**Methodology.** Original `locomo10.json` (snap-research/locomo) — the file Mem0/Zep publish against. Categories 1–4; adversarial (cat 5) excluded (ungradeable — 444/446 have no ground-truth answer), matching the Mem0/Zep convention. The full Unison agent ingests each conversation once, retrieves, and answers. n=128, proportional, seed 1234.
+**Dataset:** [snap-research/locomo](https://github.com/snap-research/locomo) — original `locomo10.json` ([paper](https://arxiv.org/abs/2402.17753), ACL 2024). Scored on categories 1–4 (single-hop, multi-hop, temporal, open-domain); adversarial (cat 5) excluded — it is ungradeable (444/446 have no ground-truth answer). The full Unison agent ingests each conversation once, retrieves, and answers. n=128, proportional, seed 1234.
 
-| System | Answer accuracy (cats 1–4) |
+| Metric | Answer accuracy |
 |---|---|
-| **Unison** | **85.9%** |
-| Full-context (ceiling) | 72.9% |
-| Mem0-graph | 68.4% |
-| Mem0 | 66.9% |
-| Zep | 66.0% |
+| **Overall** (cats 1–4, n=128) | **85.9%** |
+| open-domain | 93% (n=70) |
+| multi-hop | 81% (n=27) |
+| single-hop | 78% (n=23) |
+| temporal | 62% (n=8) |
 
-Unison per-category: open-domain 93% (70) · multi-hop 81% (27) · single-hop 78% (23) · temporal 62% (8).
-
-<sub>Comparison figures are the published Mem0/Zep/full-context results (Mem0 paper, `gpt-4o-mini` judge). LOCOMO carries ~6.4% documented label errors that affect all systems (penfieldlabs audit).</sub>
+<sub>LOCOMO carries ~6.4% documented label errors that affect any system scored on it ([penfieldlabs audit](https://penfieldlabs.substack.com/p/we-audited-locomo-64-of-the-answer)).</sub>
 
 ```bash
 EVAL_STRATIFIED=proportional EVAL_SEED=1234 \
   uv run unison-evals run --dataset locomo --systems unison-agent --limit 128 --dev
 ```
 
-### LongMemEval (`longmemeval_s_cleaned`)
+### LongMemEval
 
-**Methodology.** The hard split — full ~50-session haystacks **with distractors** (what Zep/Mem0 report on, not the `oracle` split). The full Unison agent ingests → retrieves → answers. n=150, proportional, seed 9012.
+**Dataset:** [LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025), `longmemeval_s_cleaned` — the hard split with full ~50-session haystacks **and distractors**. The full Unison agent ingests → retrieves → answers. n=150, proportional, seed 9012.
 
-| System | Answer accuracy |
+| Metric | Answer accuracy |
 |---|---|
-| **Unison** | **91.3%** |
-| Zep | 71.2% |
-| Full-context (gpt-4o) | 60.2% |
-
-<sub>Comparison figures are published answer-accuracy results on LongMemEval-S (Zep paper; Supermemory's LongMemEval report, `gpt-4o` judge). Recall@k-only systems are excluded as non-comparable (different metric).</sub>
+| **Overall** (n=150) | **91.3%** |
 
 **Reproducing `unison-agent`.** The harness is open source, but `unison-agent` runs against a Unison brain server that is **authenticated and not publicly hosted** — request an eval access token by emailing **misha@unisonlabs.ai** (briefly state your use case), then point the harness at the provided server:
 

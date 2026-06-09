@@ -232,6 +232,46 @@ separate document. If the HuggingFace download fails, the loader falls back to a
 
 ---
 
+### LOCOMO
+
+| Field | Value |
+|---|---|
+| Paper | "Evaluating Very Long-Term Conversational Memory of LLM Agents" |
+| arXiv | 2402.17753 |
+| Venue | ACL 2024 |
+| Source | `snap-research/locomo` — `data/locomo10.json` |
+| License | research use (see upstream repo) |
+| Size | 10 multi-session dialogues, ~1,986 Q/A (cats 1–4 = 1,540 scored) |
+| Categories | single-hop (1), multi-hop (2), temporal (3), open-domain (4), adversarial (5) |
+
+LOCOMO is the head-to-head surface Mem0, Zep, and MemMachine report on: ten very-long
+two-speaker conversations (~19 sessions each), each carrying QA pairs over the whole
+conversation. By field convention (Mem0/Zep) the adversarial category (5) is **excluded**
+from scoring — it is ungradeable (444/446 have no ground-truth answer), leaving 1,540
+scored questions across categories 1–4. The category numbering was verified against the
+`locomo10.json` counts (1:282, 2:321, 3:96, 4:841, 5:446). LOCOMO has ~6.4% documented
+label errors that affect every system (penfieldlabs audit), so absolute scores should be
+read with that noise floor in mind.
+
+Loader specifics (`src/unison_evals/memory_evals/datasets/locomo.py`): downloads + caches
+`locomo10.json`; each conversation's sessions become one document each. All QA over a
+conversation share a `corpus_key`, so the brain is seeded **once per conversation** and
+reused across its questions (not re-seeded per question). Adversarial is excluded by
+default — set `LOCOMO_INCLUDE_ADVERSARIAL=1` to include it (e.g. to measure abstention).
+If the download fails, the loader falls back to an embedded smoke sample so CI runs offline.
+
+```bibtex
+@inproceedings{maharana2024locomo,
+  title     = {Evaluating Very Long-Term Conversational Memory of LLM Agents},
+  author    = {Maharana, Adyasha and Lee, Dong-Ho and Tulyakov, Sergey and Bansal, Mohit and Barbieri, Francesco and Fang, Yuwei},
+  booktitle = {ACL 2024},
+  year      = {2024},
+  url       = {https://arxiv.org/abs/2402.17753}
+}
+```
+
+---
+
 ### MemoryAgentBench
 
 | Field | Value |

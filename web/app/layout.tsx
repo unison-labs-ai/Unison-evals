@@ -31,7 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 Compare
               </Link>
               <a
-                href="https://github.com/Unison-Workspace/Unison-evals"
+                href="https://github.com/unison-labs-ai/Unison-evals"
                 target="_blank"
                 rel="noreferrer"
                 className="hover:opacity-70"

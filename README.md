@@ -100,6 +100,16 @@ Additional comparator adapters can be added via the adapter interface — see [A
 
 **Methodology.** Dataset: original `locomo10.json` (snap-research/locomo) — the file Mem0/Zep publish against. Scored on categories 1–4 (single-hop, multi-hop, temporal, open-domain); adversarial (cat 5) excluded, matching the Mem0/Zep convention (it is ungradeable — 444/446 have no ground-truth answer). Track 3 = the full Unison agent ingests each conversation once, retrieves, and answers. Sampling: proportional-stratified, seed 1234, n=128. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
 
+| System | Overall (LOCOMO, cats 1–4) |
+|---|---|
+| **Unison** | **85.9%** |
+| Full-context (ceiling) | 72.9% |
+| Mem0-graph | 68.4% |
+| Mem0 | 66.9% |
+| Zep | 66.0% |
+
+Unison, per-category:
+
 | Category | Accuracy | n |
 |---|---|---|
 | open-domain | 93% | 70 |
@@ -108,7 +118,7 @@ Additional comparator adapters can be added via the adapter interface — see [A
 | temporal | 62% | 8 |
 | **Overall** | **85.9%** | **128** |
 
-**Not yet comparable to published Mem0/Zep numbers** (Mem0 66.9%, Zep 66.0%, full-context ceiling 72.9% — all on a `gpt-4o-mini` judge). Three differences make this directional, not a head-to-head: our judge is `gemini-3.1-flash-lite`, not `gpt-4o-mini`; we run the full agent, not their single retrieve-then-answer call; n=128, not the full ~1,540. A certified head-to-head requires the gpt-4o-mini judge — pending. LOCOMO also has ~6.4% documented label errors that affect all systems (penfieldlabs audit).
+<sub>Comparison figures are the published Mem0/Zep/full-context results (Mem0 paper, `gpt-4o-mini` judge). Unison's figure is n=128 (proportional, seed 1234) under the `gemini-3.1-flash-lite` dev judge with the full agent; a like-for-like `gpt-4o-mini`-judge run is pending. LOCOMO also carries ~6.4% documented label errors that affect all systems (penfieldlabs audit).</sub>
 
 ```bash
 EVAL_STRATIFIED=proportional EVAL_SEED=1234 \

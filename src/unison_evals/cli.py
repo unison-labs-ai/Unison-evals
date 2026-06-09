@@ -500,6 +500,83 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
     )
 
 
+def _gold_hit(gold_paths: set[str], retrieved: list[str], k: int) -> bool:
+    """recall@k: did any gold doc land in the top-k retrieved? Matched by slugged
+    basename so it survives the per-question namespace rewrite seeding applies."""
+    from .memory_evals.adapters.unison_agent import _to_writable_seed_path
+
+    gold_bases = {_to_writable_seed_path(g, "x").rsplit("/", 1)[-1] for g in gold_paths}
+    top = {p.rsplit("/", 1)[-1] for p in retrieved[:k]}
+    return bool(gold_bases & top)
+
+
+@main.command()
+@click.option(
+    "--dataset",
+    type=click.Choice([b for b in BENCHMARKS if b != "context-bench"]),
+    required=True,
+    help="Memory dataset to measure retrieval recall on.",
+)
+@click.option("--limit", type=int, default=None, help="Max questions (default: all).")
+@click.option("--ks", default="5,10,25", help="Comma-separated k values for recall@k.")
+@click.option("--system", default="unison-agent", show_default=True)
+def recall(dataset: str, limit: int | None, ks: str, system: str) -> None:
+    """Track-1 retrieval recall@k diagnostic — did the gold session land in the
+    top-k retrieved? Separates retrieval quality from answer quality (no LLM judge).
+
+    Requires UNISON_PREINGEST_MANIFEST pointing at pre-seeded brains (run
+    `preingest`, or a prior `run`, first).
+    """
+    asyncio.run(_run_recall(dataset, limit, ks, system))
+
+
+async def _run_recall(dataset: str, limit: int | None, ks: str, system: str) -> None:
+    from collections import defaultdict
+
+    kvals = sorted({int(x) for x in ks.split(",") if x.strip()})
+    ds = get_dataset(dataset)
+    questions = list(ds.load_brain_questions(limit))
+    adapter = ADAPTER_REGISTRY[system]()
+    await adapter.setup()
+
+    agg = {k: [0, 0] for k in kvals}
+    bycat: dict[str, dict[int, list[int]]] = defaultdict(lambda: {k: [0, 0] for k in kvals})
+    skipped_no_gold = 0
+    for q in questions:
+        if not q.gold_doc_paths:
+            skipped_no_gold += 1  # unanswerable / no labeled gold → not a recall question
+            continue
+        retrieved = await adapter.retrieve(q.query, q.effective_corpus_key, max(kvals))
+        cat = str(q.metadata.get("question_type") or "?")
+        for k in kvals:
+            if _gold_hit(q.gold_doc_paths, retrieved, k):
+                agg[k][0] += 1
+                bycat[cat][k][0] += 1
+            agg[k][1] += 1
+            bycat[cat][k][1] += 1
+
+    n = agg[kvals[0]][1] if kvals else 0
+    console.print(
+        f"\n[bold]Retrieval recall@k — {dataset}[/] "
+        f"(n with gold = {n}, skipped {skipped_no_gold} unanswerable)"
+    )
+    for k in kvals:
+        h, t = agg[k]
+        console.print(f"  recall@{k}: {100 * h / t:.1f}%  ({h}/{t})" if t else f"  recall@{k}: n/a")
+    if bycat:
+        console.print("per-category:")
+        for cat in sorted(bycat):
+            cells = " · ".join(
+                (
+                    f"@{k} {100 * bycat[cat][k][0] / bycat[cat][k][1]:.0f}%"
+                    if bycat[cat][k][1]
+                    else f"@{k} n/a"
+                )
+                for k in kvals
+            )
+            console.print(f"  {cat}: {cells}")
+
+
 # CLI for SystemSummary type-import linting hygiene
 _SYSTEM_SUMMARY_TYPE: type = SystemSummary
 

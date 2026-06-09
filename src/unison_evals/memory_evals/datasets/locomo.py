@@ -227,12 +227,20 @@ _EMBEDDED_SMOKE: list[dict[str, Any]] = [
             "speaker_b": "Melanie",
             "session_1_date_time": "1:56 pm on 8 May, 2023",
             "session_1": [
-                {"speaker": "Caroline", "dia_id": "D1:1", "text": "I adopted a golden retriever named Toby."},
+                {
+                    "speaker": "Caroline",
+                    "dia_id": "D1:1",
+                    "text": "I adopted a golden retriever named Toby.",
+                },
                 {"speaker": "Melanie", "dia_id": "D1:2", "text": "That's wonderful!"},
             ],
             "session_2_date_time": "10:10 am on 20 June, 2023",
             "session_2": [
-                {"speaker": "Caroline", "dia_id": "D2:1", "text": "Toby just turned 1 year old today."},
+                {
+                    "speaker": "Caroline",
+                    "dia_id": "D2:1",
+                    "text": "Toby just turned 1 year old today.",
+                },
                 {"speaker": "Melanie", "dia_id": "D2:2", "text": "Happy birthday, Toby!"},
             ],
         },

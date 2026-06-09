@@ -95,7 +95,9 @@ class LongMemEvalDataset(Dataset):
         same scheme — positional when the IDs are positional integers/indices,
         or direct string matching when they are explicit session ID strings.
         """
-        qid = str(row.get("question_id") or row.get("id") or row.get("qid") or stable_id("lme", row))
+        qid = str(
+            row.get("question_id") or row.get("id") or row.get("qid") or stable_id("lme", row)
+        )
         # LongMemEval's canonical eval gives the model the question_date as "now"
         # — temporal questions ("how long ago") are unanswerable without it. Omitting
         # it made the agent compute intervals from its own training-era date. Prepend
@@ -180,7 +182,9 @@ class LongMemEvalDataset(Dataset):
           - haystack_dates: list[str]
           - answer_session_ids: list[str]
         """
-        qid = str(row.get("question_id") or row.get("id") or row.get("qid") or stable_id("lme", row))
+        qid = str(
+            row.get("question_id") or row.get("id") or row.get("qid") or stable_id("lme", row)
+        )
         question = with_question_date(
             row.get("question_date"), str(row.get("question") or row.get("query") or "")
         )

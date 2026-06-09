@@ -480,18 +480,20 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
     done = skipped = failed = 0
     total = len(questions)
     for i, q in enumerate(questions, 1):
-        if tenant_for(manifest, q.id):
+        # Key on the CORPUS: questions sharing a corpus (LOCOMO) seed it once.
+        key = q.effective_corpus_key
+        if tenant_for(manifest, key):
             skipped += 1
             continue
-        tenant = await adapter.preingest_question(q.query, q.corpus, q.id)
+        tenant = await adapter.preingest_question(q.query, q.corpus, key)
         if tenant:
-            manifest["questions"][q.id] = tenant
+            manifest["questions"][key] = tenant
             save_manifest(manifest_path, manifest)  # incremental — crash-safe
             done += 1
-            console.print(f"[green]OK[/] [{i}/{total}] {q.id} -> {tenant}")
+            console.print(f"[green]OK[/] [{i}/{total}] {key} -> {tenant}")
         else:
             failed += 1
-            console.print(f"[red]FAIL[/] [{i}/{total}] {q.id} ingest failed")
+            console.print(f"[red]FAIL[/] [{i}/{total}] {key} ingest failed")
     console.print(
         f"\npre-ingest complete: {done} ingested, {skipped} already present, "
         f"{failed} failed -> {manifest_path}"

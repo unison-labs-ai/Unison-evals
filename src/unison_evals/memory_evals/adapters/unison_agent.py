@@ -7,6 +7,7 @@ provided context only — brain/FS/workspace tools are stripped server-side).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
@@ -59,6 +60,17 @@ class UnisonAgentAdapter(AgentAdapter):
         # the NEXT run reuses it. First run seeds, later runs are query-only.
         self._manifest: dict[str, Any] | None = None
         self._manifest_path: str | None = None
+        # Per-corpus_key locks: when many questions share one corpus (LOCOMO), the
+        # FIRST to arrive seeds the conversation while the rest WAIT on this lock,
+        # then reuse the freshly-cached tenant instead of each re-seeding it.
+        self._seed_locks: dict[str, asyncio.Lock] = {}
+
+    def _seed_lock(self, key: str) -> asyncio.Lock:
+        lock = self._seed_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._seed_locks[key] = lock
+        return lock
 
     async def setup(self) -> None:
         is_localhost = is_localhost_url(self.settings.unison_api_url)
@@ -115,14 +127,36 @@ class UnisonAgentAdapter(AgentAdapter):
         oracle_context: str | None = None,
         seed_docs: list[Document] | None = None,
         question_id: str | None = None,
+        corpus_key: str | None = None,
     ) -> AdapterResult:
         assert self._client is not None, "setup() must be called first"
 
-        # Pre-ingested reuse: when this question's haystack was already ingested
-        # into a persistent tenant, query it read-only (no re-seed, no teardown).
+        # Cache/seed key: the CORPUS, not the question. Many questions can share a
+        # corpus (LOCOMO) — they seed it once and reuse. Defaults to question_id.
+        cache_key = corpus_key or question_id
+
+        # Pre-ingested reuse: when this corpus was already ingested into a
+        # persistent tenant, query it read-only (no re-seed, no teardown).
         preingested_tenant: str | None = None
-        if self._manifest is not None and question_id is not None:
-            preingested_tenant = tenant_for(self._manifest, question_id)
+        if self._manifest is not None and cache_key is not None:
+            preingested_tenant = tenant_for(self._manifest, cache_key)
+
+        # If not yet seeded, serialize on the corpus so concurrent same-corpus
+        # questions don't each seed it: the first holds the lock through its seed,
+        # the rest wait then fall through to reuse the freshly-cached tenant.
+        held_lock: asyncio.Lock | None = None
+        if (
+            preingested_tenant is None
+            and self._manifest is not None
+            and cache_key is not None
+            and seed_docs is not None
+        ):
+            held_lock = self._seed_lock(cache_key)
+            await held_lock.acquire()
+            preingested_tenant = tenant_for(self._manifest, cache_key)  # re-check under lock
+            if preingested_tenant is not None:
+                held_lock.release()
+                held_lock = None
 
         if oracle_context is not None and seed_docs is not None:
             return AdapterResult(
@@ -205,9 +239,9 @@ class UnisonAgentAdapter(AgentAdapter):
                 self._manifest is not None
                 and self._manifest_path is not None
                 and provisioned_tenant is not None
-                and question_id is not None
+                and cache_key is not None
             ):
-                self._manifest.setdefault("questions", {})[question_id] = provisioned_tenant
+                self._manifest.setdefault("questions", {})[cache_key] = provisioned_tenant
                 save_manifest(self._manifest_path, self._manifest)
 
             raw: dict[str, Any] = dict(data)
@@ -246,6 +280,10 @@ class UnisonAgentAdapter(AgentAdapter):
                 error=f"HTTP error: {e}",
             )
         finally:
+            # Release the per-corpus seed lock so waiting same-corpus questions
+            # can now reuse the tenant this call just cached.
+            if held_lock is not None:
+                held_lock.release()
             # Tear down only in pure-ephemeral mode. In manifest mode we KEEP
             # every provisioned tenant — it's just been cached for reuse by the
             # next run (and its brain + trajectory persist for analysis).

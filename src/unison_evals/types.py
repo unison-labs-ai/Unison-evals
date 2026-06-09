@@ -214,3 +214,13 @@ class BrainQuestion(BaseModel):
     corpus: list[Document]
     gold_doc_paths: set[str]
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Stable key identifying this question's CORPUS. When multiple questions share
+    # the same corpus (e.g. LOCOMO: ~200 qa over one conversation), they share a
+    # corpus_key so the brain is seeded ONCE per corpus and reused — not re-seeded
+    # per question. Defaults to `id` (every question its own corpus, e.g.
+    # LongMemEval). Read it via `effective_corpus_key`.
+    corpus_key: str | None = None
+
+    @property
+    def effective_corpus_key(self) -> str:
+        return self.corpus_key or self.id

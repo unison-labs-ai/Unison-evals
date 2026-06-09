@@ -135,6 +135,9 @@ class LocomoDataset(Dataset):
             query=with_question_date(row.get("date"), row["question"]),
             corpus=corpus,
             gold_doc_paths=gold_paths,
+            # All qa over the same conversation share its corpus → one seed per
+            # conversation, reused across its ~200 questions (not re-seeded each).
+            corpus_key=row["corpus_key"],
             metadata={
                 "question_type": row["question_type"],
                 "expected_answer": row["answer"],
@@ -190,6 +193,7 @@ class LocomoDataset(Dataset):
                 }
                 yield {
                     "question_id": f"locomo-{sample_key}-{q_idx}",
+                    "corpus_key": f"locomo-conv-{sample_key}",
                     "question_type": CATEGORY_NAMES.get(cat, str(cat)),
                     "question": str(qa.get("question") or ""),
                     "answer": str(answer if answer is not None else ""),

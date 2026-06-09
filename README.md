@@ -8,7 +8,7 @@ Public benchmark harness for [Unison](https://github.com/unison-labs-ai/unison-b
 
 Treats the production agent as a black box: every system implements one adapter (~80 LOC), points at its API/CLI, and is scored on the same datasets with the same metrics under the same constraints.
 
-> **v0.1 — early but real.** Ships 3 datasets (LongMemEval, MemoryAgentBench, Context-Bench) across 2 tracks (agent-oracle, agent-e2e), with adapters for `unison-agent` and `unison-agent-pipeline`. The hosted leaderboard is next.
+> **v0.1 — early but real.** Ships 4 datasets (LongMemEval, LOCOMO, MemoryAgentBench, Context-Bench) across 2 tracks (agent-oracle, agent-e2e), with adapters for `unison-agent` and `unison-agent-pipeline`. The hosted leaderboard is next.
 
 ## Repository structure
 
@@ -95,6 +95,25 @@ Additional comparator adapters can be added via the adapter interface — see [A
 - **Dev judge.** These numbers use `gemini-3.1-flash-lite`, *not* `gpt-4o`. The publishable, cross-system-comparable number requires the gpt-4o judge (`JUDGE_MODEL=gpt-4o-2024-08-06`); it can move the score in either direction.
 - **Variance.** Run-to-run decoding variance is ±2–3pp even at n=150 (the `auto` tier samples non-deterministically) — hence the per-run spread above and the pooling of 3 runs into n=450 for the reported figures.
 - **No benchmark contamination.** Prompts contain only general principles, not question-specific exemplars; a locked `EVAL_SPLIT=dev|holdout` partition guards against overfitting (tune on `dev`, validate on `holdout`).
+
+## Results — LOCOMO (Track 3, agentic end-to-end)
+
+**Methodology.** Dataset: original `locomo10.json` (snap-research/locomo) — the file Mem0/Zep publish against. Scored on categories 1–4 (single-hop, multi-hop, temporal, open-domain); adversarial (cat 5) excluded, matching the Mem0/Zep convention (it is ungradeable — 444/446 have no ground-truth answer). Track 3 = the full Unison agent ingests each conversation once, retrieves, and answers. Sampling: proportional-stratified, seed 1234, n=128. Judge: `gemini-3.1-flash-lite` (the `--dev` judge — see caveats).
+
+| Category | Accuracy | n |
+|---|---|---|
+| open-domain | 93% | 70 |
+| multi-hop | 81% | 27 |
+| single-hop | 78% | 23 |
+| temporal | 62% | 8 |
+| **Overall** | **85.9%** | **128** |
+
+**Not yet comparable to published Mem0/Zep numbers** (Mem0 66.9%, Zep 66.0%, full-context ceiling 72.9% — all on a `gpt-4o-mini` judge). Three differences make this directional, not a head-to-head: our judge is `gemini-3.1-flash-lite`, not `gpt-4o-mini`; we run the full agent, not their single retrieve-then-answer call; n=128, not the full ~1,540. A certified head-to-head requires the gpt-4o-mini judge — pending. LOCOMO also has ~6.4% documented label errors that affect all systems (penfieldlabs audit).
+
+```bash
+EVAL_STRATIFIED=proportional EVAL_SEED=1234 \
+  uv run unison-evals run --dataset locomo --systems unison-agent --limit 128 --dev
+```
 
 ## Quickstart
 

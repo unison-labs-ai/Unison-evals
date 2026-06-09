@@ -290,6 +290,28 @@ class UnisonAgentAdapter(AgentAdapter):
             if provisioned_tenant is not None and self._manifest is None:
                 await self._teardown_tenant(provisioned_tenant)
 
+    async def retrieve(self, question: str, corpus_key: str, k: int = 25) -> list[str]:
+        """Track-1 recall@k diagnostic: run ONE semantic search against the
+        (pre-seeded) tenant for this corpus and return the ranked retrieved doc
+        paths — no agent turn. Requires the corpus to already be in the manifest
+        (run `preingest`, or a prior `run`, first); returns [] otherwise.
+        """
+        assert self._client is not None, "setup() must be called first"
+        tenant = tenant_for(self._manifest, corpus_key) if self._manifest is not None else None
+        body: dict[str, Any] = {"question": question, "retrieveOnly": True, "retrieveK": k}
+        if tenant is not None:
+            body["tenantId"] = tenant
+            body["memoryMode"] = "fresh"
+        try:
+            resp = await self._client.post("/api/rest/agents/eval-turn", json=body)
+            if resp.status_code != 200:
+                logger.warning("retrieve non-200", status=resp.status_code, body=resp.text[:200])
+                return []
+            return list(resp.json().get("retrievedPaths") or [])
+        except httpx.HTTPError as e:
+            logger.warning("retrieve error", error=str(e))
+            return []
+
     async def preingest_question(
         self, question: str, seed_docs: list[Document], question_id: str
     ) -> str | None:

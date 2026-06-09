@@ -148,8 +148,14 @@ class AgentE2ERunner:
                 async with sem:
                     adapter = adapters[sys_name]
                     # Track 3: pass per-question corpus as seed_docs; no oracle_context.
-                    # question_id lets the adapter reuse a pre-ingested tenant.
-                    answer = await adapter.answer(q.query, seed_docs=q.corpus, question_id=q.id)
+                    # question_id + corpus_key let the adapter reuse a pre-ingested
+                    # tenant (corpus_key shares one seed across same-corpus questions).
+                    answer = await adapter.answer(
+                        q.query,
+                        seed_docs=q.corpus,
+                        question_id=q.id,
+                        corpus_key=q.effective_corpus_key,
+                    )
                     if answer.error:
                         judge_res = JudgeResult(
                             score=0.0,

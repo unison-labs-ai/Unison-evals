@@ -37,11 +37,15 @@ class AgentAdapter(ABC):
         oracle_context: str | None = None,
         seed_docs: list[Document] | None = None,
         question_id: str | None = None,
+        corpus_key: str | None = None,
     ) -> AdapterResult:
         """Answer one question.
 
         question_id (optional): the dataset id, used to reuse a pre-ingested
         persistent tenant from the manifest when one exists.
+        corpus_key (optional): stable key for this question's CORPUS. Questions
+        sharing a corpus (e.g. LOCOMO) share a key so the brain is seeded once
+        per corpus and reused. Defaults to question_id.
 
         Args:
             question: The user-facing question text.

@@ -33,6 +33,7 @@ class _RecordingAdapter(AgentAdapter):
         oracle_context: str | None = None,
         seed_docs: list[Document] | None = None,
         question_id: str | None = None,
+        corpus_key: str | None = None,
     ) -> AdapterResult:
         self.calls.append(
             {
@@ -145,6 +146,7 @@ async def test_runner_adapter_error_gives_judge_score_zero() -> None:
             oracle_context: str | None = None,
             seed_docs: list[Document] | None = None,
             question_id: str | None = None,
+            corpus_key: str | None = None,
         ) -> AdapterResult:
             return AdapterResult(answer="", cost_usd=0.0, latency_ms=5.0, error="simulated error")
 
@@ -174,6 +176,7 @@ async def test_runner_skips_adapter_that_fails_setup() -> None:
             oracle_context: str | None = None,
             seed_docs: list[Document] | None = None,
             question_id: str | None = None,
+            corpus_key: str | None = None,
         ) -> AdapterResult:
             return AdapterResult(answer="x", cost_usd=0.0, latency_ms=1.0)
 
@@ -213,6 +216,7 @@ async def test_mean_input_tokens_per_q_computed() -> None:
             oracle_context: str | None = None,
             seed_docs: list[Document] | None = None,
             question_id: str | None = None,
+            corpus_key: str | None = None,
         ) -> AdapterResult:
             return AdapterResult(
                 answer="answer",

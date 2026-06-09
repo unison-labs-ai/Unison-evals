@@ -4,7 +4,7 @@ message: "If you use unison-evals in research or a product comparison, please ci
 type: software
 authors:
   - name: "Unison"
-repository-code: "https://github.com/Unison-Workspace/Unison-evals"
+repository-code: "https://github.com/unison-labs-ai/Unison-evals"
 url: "https://unisonlabs.ai"
 license: Apache-2.0
 version: "0.1.0"

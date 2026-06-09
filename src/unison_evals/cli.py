@@ -455,6 +455,7 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
 
     from .memory_evals.datasets import get_dataset
     from .memory_evals.preingest import load_manifest, save_manifest, tenant_for
+    from .types import BrainQuestion
 
     if system not in ADAPTER_REGISTRY:
         raise click.BadParameter(f"Unknown system '{system}'.")
@@ -472,28 +473,47 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
             "seed": os.environ.get("EVAL_SEED", "1234"),
             "split": os.environ.get("EVAL_SPLIT", ""),
             "stratified": os.environ.get("EVAL_STRATIFIED", ""),
-            "embed_model": os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+            "embed_model": os.environ.get(
+                "EMBED_MODEL",
+                os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
+            ),
             "updated": datetime.now(UTC).isoformat(),
         }
     )
 
     done = skipped = failed = 0
     total = len(questions)
-    for i, q in enumerate(questions, 1):
-        # Key on the CORPUS: questions sharing a corpus (LOCOMO) seed it once.
+    # Seed concurrently — the server embeds each haystack independently, so the
+    # one-at-a-time loop was the bottleneck. A semaphore caps in-flight seeds; a
+    # lock guards the manifest dict + incremental save; `claimed` stops two tasks
+    # seeding the SAME corpus (LOCOMO shares one corpus across many questions).
+    concurrency = int(os.environ.get("PREINGEST_CONCURRENCY", "8"))
+    sem = asyncio.Semaphore(concurrency)
+    lock = asyncio.Lock()
+    claimed: set[str] = set()
+
+    async def seed_one(q: BrainQuestion) -> None:
+        nonlocal done, skipped, failed
         key = q.effective_corpus_key
-        if tenant_for(manifest, key):
-            skipped += 1
-            continue
-        tenant = await adapter.preingest_question(q.query, q.corpus, key)
-        if tenant:
-            manifest["questions"][key] = tenant
-            save_manifest(manifest_path, manifest)  # incremental — crash-safe
-            done += 1
-            console.print(f"[green]OK[/] [{i}/{total}] {key} -> {tenant}")
-        else:
-            failed += 1
-            console.print(f"[red]FAIL[/] [{i}/{total}] {key} ingest failed")
+        async with lock:
+            if tenant_for(manifest, key) or key in claimed:
+                skipped += 1
+                return
+            claimed.add(key)
+        async with sem:
+            tenant = await adapter.preingest_question(q.query, q.corpus, key)
+        async with lock:
+            if tenant:
+                manifest["questions"][key] = tenant
+                save_manifest(manifest_path, manifest)  # incremental — crash-safe
+                done += 1
+                console.print(f"[green]OK[/] [{done + failed}/{total}] {key} -> {tenant}")
+            else:
+                claimed.discard(key)
+                failed += 1
+                console.print(f"[red]FAIL[/] [{done + failed}/{total}] {key} ingest failed")
+
+    await asyncio.gather(*(seed_one(q) for q in questions))
     console.print(
         f"\npre-ingest complete: {done} ingested, {skipped} already present, "
         f"{failed} failed -> {manifest_path}"

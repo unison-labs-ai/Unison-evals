@@ -150,7 +150,18 @@ class LongMemEvalDataset(Dataset):
         We use streaming=True to skip generating the broken `longmemeval_m_cleaned`
         split (which has type-inconsistent `answer` columns and breaks PyArrow
         conversion). With streaming, only the requested split is iterated.
+
+        LONGMEMEVAL_LOCAL_FILE overrides everything: read a plain JSON array from
+        disk. This is how you run the ORIGINAL raw `longmemeval_s` (the file Zep/
+        gbrain benchmarked on, since removed from the HF datasets API but still
+        resolvable as a raw blob) for a true 1-to-1 comparison.
         """
+        local = os.environ.get("LONGMEMEVAL_LOCAL_FILE")
+        if local:
+            import json
+
+            with open(local) as f:
+                return list(json.load(f))
         try:
             ds = load_dataset(
                 HF_DATASET,

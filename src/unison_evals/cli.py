@@ -23,9 +23,10 @@ from .types import RunSummary, SystemSummary
 console = Console()
 
 # The one benchmark list + each one's publishable ("real") canonical judge.
-BENCHMARKS = ("longmemeval", "memoryagentbench", "context-bench")
+BENCHMARKS = ("longmemeval", "locomo", "memoryagentbench", "context-bench")
 CANONICAL_JUDGE = {
     "longmemeval": "gpt-4o-2024-08-06",  # LongMemEval paper judge (>97% human agreement)
+    "locomo": "gpt-4o-2024-08-06",  # de-facto LOCOMO judge (Mem0/Zep "J" score parity)
     "memoryagentbench": "gpt-4o-2024-08-06",  # de-facto memory-eval judge
     "context-bench": "gpt-5-mini",  # Letta-leaderboard parity
 }

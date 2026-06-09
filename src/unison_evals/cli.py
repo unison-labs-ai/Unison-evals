@@ -500,14 +500,27 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
     )
 
 
+def _unique_session_basenames(retrieved: list[str]) -> list[str]:
+    """Roll retrieved paths up to UNIQUE session-doc basenames in rank order,
+    skipping synthesized entity/fact pages (only ``sessions--*`` docs are
+    gold-eligible sessions). Mirrors gbrain-evals' ``uniqSessionIds`` so recall@k
+    is measured the same way: top-k distinct SESSIONS, not top-k raw hits."""
+    out: list[str] = []
+    for p in retrieved:
+        b = p.rsplit("/", 1)[-1]
+        if b.startswith("sessions--") and b not in out:
+            out.append(b)
+    return out
+
+
 def _gold_hit(gold_paths: set[str], retrieved: list[str], k: int) -> bool:
-    """recall@k: did any gold doc land in the top-k retrieved? Matched by slugged
-    basename so it survives the per-question namespace rewrite seeding applies."""
+    """recall@k: did a gold session land in the top-k UNIQUE retrieved sessions?
+    Gold matched by slugged basename (robust to the seed namespace rewrite)."""
     from .memory_evals.adapters.unison_agent import _to_writable_seed_path
 
-    gold_bases = {_to_writable_seed_path(g, "x").rsplit("/", 1)[-1] for g in gold_paths}
-    top = {p.rsplit("/", 1)[-1] for p in retrieved[:k]}
-    return bool(gold_bases & top)
+    gold = {_to_writable_seed_path(g, "x").rsplit("/", 1)[-1] for g in gold_paths}
+    top_sessions = set(_unique_session_basenames(retrieved)[:k])
+    return bool(gold & top_sessions)
 
 
 @main.command()
@@ -546,7 +559,9 @@ async def _run_recall(dataset: str, limit: int | None, ks: str, system: str) -> 
         if not q.gold_doc_paths:
             skipped_no_gold += 1  # unanswerable / no labeled gold → not a recall question
             continue
-        retrieved = await adapter.retrieve(q.query, q.effective_corpus_key, max(kvals))
+        # Retrieve a generous candidate pool so >=k distinct SESSIONS survive the
+        # synthesized-page interleaving (we roll up to unique sessions below).
+        retrieved = await adapter.retrieve(q.query, q.effective_corpus_key, max(60, max(kvals) * 2))
         cat = str(q.metadata.get("question_type") or "?")
         for k in kvals:
             if _gold_hit(q.gold_doc_paths, retrieved, k):

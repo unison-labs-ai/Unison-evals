@@ -8,10 +8,12 @@ methods, register in REGISTRY.
 
 from .base import AgentAdapter
 from .unison_agent import UnisonAgentAdapter, UnisonAgentPipelineAdapter
+from .unison_brain_context import UnisonBrainContextAdapter
 
 REGISTRY: dict[str, type[AgentAdapter]] = {
     "unison-agent": UnisonAgentAdapter,
     "unison-agent-pipeline": UnisonAgentPipelineAdapter,
+    "unison-brain-context": UnisonBrainContextAdapter,
 }
 
 
@@ -28,5 +30,6 @@ __all__ = [
     "AgentAdapter",
     "UnisonAgentAdapter",
     "UnisonAgentPipelineAdapter",
+    "UnisonBrainContextAdapter",
     "get_adapter",
 ]

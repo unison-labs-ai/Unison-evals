@@ -110,6 +110,8 @@ async def test_answer_e2e_flow(httpx_mock, monkeypatch) -> None:
     monkeypatch.setattr(s, "unison_brain_machine_key", "")
     monkeypatch.setattr(s, "unison_eval_tenant_id", "")
     monkeypatch.setattr(s, "unison_eval_user_id", "")
+    # Disable full-doc fetching so mock HTTP responses stay simple.
+    monkeypatch.setattr(s, "context_fetch_full_docs", False)
 
     # health check
     httpx_mock.add_response(url="http://localhost:3001/health", status_code=200, json={"ok": True})
@@ -272,6 +274,8 @@ async def test_answer_brain_context_401(httpx_mock, monkeypatch) -> None:
     monkeypatch.setattr(s, "unison_brain_machine_key", "")
     monkeypatch.setattr(s, "unison_eval_tenant_id", "")
     monkeypatch.setattr(s, "unison_eval_user_id", "")
+    # Disable full-doc fetching so mock HTTP responses stay simple.
+    monkeypatch.setattr(s, "context_fetch_full_docs", False)
 
     httpx_mock.add_response(url="http://localhost:3001/health", status_code=200, json={"ok": True})
     httpx_mock.add_response(

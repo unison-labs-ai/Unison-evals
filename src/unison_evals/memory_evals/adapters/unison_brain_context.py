@@ -388,6 +388,34 @@ class UnisonBrainContextAdapter(AgentAdapter):
             hits: list = data.get("hits") or []
             weak_evidence: bool = bool(data.get("weakEvidence", False))
 
+            # Optional: fetch full document bodies for top-k hits and append to
+            # contextMd. /v1/brain/context returns ~160-char snippets tuned for
+            # interactive agents; single-shot reader LLMs need the full body.
+            # Note: /system/facts/ paths ARE fetched — they contain extracted fact
+            # nodes that frequently hold the direct answer (e.g. "FACT [date]: X").
+            full_docs_fetched = 0
+            if self.settings.context_fetch_full_docs and hits:
+                k = self.settings.context_full_docs_k
+                doc_parts: list[str] = ["\n\n---\n# Full document bodies (top hits)\n"]
+                for hit in hits[:k]:
+                    path = (hit.get("doc") or hit).get("path", "")
+                    if not path:
+                        continue
+                    try:
+                        doc_resp = await brain_client.get(
+                            "/v1/brain/doc", params={"path": path}
+                        )
+                        if doc_resp.status_code == 200:
+                            doc_data = doc_resp.json()
+                            body = doc_data.get("bodyMd") or ""
+                            if body:
+                                doc_parts.append(f"\n## {path}\n\n{body}\n")
+                                full_docs_fetched += 1
+                    except httpx.HTTPError:
+                        pass
+                if full_docs_fetched > 0:
+                    context_md = context_md + "".join(doc_parts)
+
             reader_start = time.perf_counter()
             answer = await self._reader_llm(question, context_md)
             reader_ms = (time.perf_counter() - reader_start) * 1000.0
@@ -404,6 +432,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
                     "context_fetch_ms": context_ms,
                     "reader_ms": reader_ms,
                     "hits": len(hits),
+                    "full_docs_fetched": full_docs_fetched,
                     "weak_evidence": weak_evidence,
                 },
                 tokens_unavailable=True,

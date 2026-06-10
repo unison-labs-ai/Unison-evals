@@ -1,20 +1,20 @@
 """Unison brain-context adapter — the new SDK-customer contract.
 
 Flow per question:
-  1. POST /v1/eval/provision   → {tenantId, userId}
+  1. POST /v1/eval/provision   → {tenantId, userId, apiKey}
   2. POST /v1/eval/seed        → bulk-write + synchronously embed haystack docs
-  3. GET  /v1/brain/context?q= → {contextMd, hits, entities, weakEvidence, …}
+  3. GET  /v1/brain/context?q=&pathPrefix=<ns>&includeBodies=true&k=10
+                              → {contextMd, hits, entities, weakEvidence, …}
+     contextMd now includes full clipped doc bodies (4k/doc, 24k total) inline —
+     no separate /v1/brain/doc fetches needed.
   4. Reader LLM over contextMd  → answer
   5. POST /v1/eval/teardown    → cleanup
 
 Auth:
   - Steps 1/2/5 use X-Unison-Eval (UNISON_EVAL_SECRET).
-  - Step 3 uses Authorization: Bearer <JWT>. The JWT is:
-      a. UNISON_JWT if set (works against prod or any server with that user's session).
-      b. UNISON_EVAL_JWT if set (dedicated eval read key).
-      c. Auto-minted via stdlib HS256 when SUPABASE_JWT_SECRET is set (local dev only).
-         The token's `sub` is the provisioned userId, binding the read to the
-         just-seeded tenant via the server's in-code tenant filter.
+  - Step 3 uses the apiKey returned by provision (usk_ machine key bound to the
+    provisioned tenant). Falls back to UNISON_BRAIN_MACHINE_KEY / UNISON_EVAL_JWT /
+    UNISON_JWT / auto-minted HS256 JWT when in shared-tenant or preingest mode.
 
 Name: "unison-brain-context"
 
@@ -270,6 +270,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
                 start=start,
                 seed_docs_count=seed_result.get("docsWritten", len(docs_to_seed)),
                 embed_ms=float(seed_result.get("embedDurationMs", 0.0)),
+                path_prefix=f"/private/sources/eval/{ns}/",
             )
 
         # Slow path: provision → seed → query → (maybe) teardown
@@ -282,7 +283,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
                 raw={},
                 error="failed to provision ephemeral eval tenant",
             )
-        tenant_id, user_id = provision
+        tenant_id, user_id, api_key = provision
 
         docs_to_seed = seed_docs or []
         ns = hashlib.sha256(question.encode()).hexdigest()[:10]
@@ -315,6 +316,8 @@ class UnisonBrainContextAdapter(AgentAdapter):
             start=start,
             seed_docs_count=seed_result.get("docsWritten", len(docs_to_seed)),
             embed_ms=float(seed_result.get("embedDurationMs", 0.0)),
+            api_key=api_key,
+            path_prefix=f"/private/sources/eval/{ns}/",
         )
 
         # Save to manifest if pre-ingest mode
@@ -351,23 +354,35 @@ class UnisonBrainContextAdapter(AgentAdapter):
         start: float,
         seed_docs_count: int,
         embed_ms: float,
+        api_key: str = "",
+        path_prefix: str = "",
     ) -> AdapterResult:
-        """GET /v1/brain/context?q=... and run the reader LLM over contextMd."""
-        jwt = self._resolve_brain_jwt(user_id, tenant_id)
+        """GET /v1/brain/context?q=&pathPrefix=<ns>&includeBodies=true&k=...
+
+        includeBodies=true instructs the server to inline full clipped doc bodies
+        (4k/doc, 24k total) directly into contextMd — no separate /v1/brain/doc
+        fetches needed.  pathPrefix scopes retrieval to the per-question namespace
+        so docs from other questions in the same shared tenant don't bleed in.
+        """
+        bearer = api_key or self._resolve_brain_jwt(user_id, tenant_id)
         brain_headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {jwt}",
+            "Authorization": f"Bearer {bearer}",
         }
+        params: dict[str, str | int] = {
+            "q": question,
+            "includeBodies": "true",
+            "k": self.settings.context_full_docs_k,
+        }
+        if path_prefix:
+            params["pathPrefix"] = path_prefix
         brain_client = httpx.AsyncClient(
             base_url=self.settings.unison_api_url,
             headers=brain_headers,
             timeout=self.settings.adapter_timeout,
         )
         try:
-            resp = await brain_client.get(
-                "/v1/brain/context",
-                params={"q": question},
-            )
+            resp = await brain_client.get("/v1/brain/context", params=params)
             context_ms = (time.perf_counter() - start) * 1000.0
             if resp.status_code != 200:
                 logger.warning(
@@ -388,35 +403,6 @@ class UnisonBrainContextAdapter(AgentAdapter):
             hits: list = data.get("hits") or []
             weak_evidence: bool = bool(data.get("weakEvidence", False))
 
-            # Optional: fetch full document bodies for top-k hits and append to
-            # contextMd. /v1/brain/context returns ~160-char snippets tuned for
-            # interactive agents; single-shot reader LLMs need the full body.
-            # Note: /system/facts/ paths return empty bodyMd from /v1/brain/doc
-            # (they exist only as vector chunks, not first-class documents). Skip
-            # them and scan up to CONTEXT_FULL_DOCS_K hits for real session docs.
-            full_docs_fetched = 0
-            if self.settings.context_fetch_full_docs and hits:
-                k = self.settings.context_full_docs_k
-                doc_parts: list[str] = ["\n\n---\n# Full document bodies (top hits)\n"]
-                for hit in hits[:k]:
-                    path = (hit.get("doc") or hit).get("path", "")
-                    if not path or path.startswith("/system/facts/"):
-                        continue
-                    try:
-                        doc_resp = await brain_client.get(
-                            "/v1/brain/doc", params={"path": path}
-                        )
-                        if doc_resp.status_code == 200:
-                            doc_data = doc_resp.json()
-                            body = doc_data.get("bodyMd") or ""
-                            if body:
-                                doc_parts.append(f"\n## {path}\n\n{body}\n")
-                                full_docs_fetched += 1
-                    except httpx.HTTPError:
-                        pass
-                if full_docs_fetched > 0:
-                    context_md = context_md + "".join(doc_parts)
-
             reader_start = time.perf_counter()
             answer = await self._reader_llm(question, context_md)
             reader_ms = (time.perf_counter() - reader_start) * 1000.0
@@ -433,7 +419,6 @@ class UnisonBrainContextAdapter(AgentAdapter):
                     "context_fetch_ms": context_ms,
                     "reader_ms": reader_ms,
                     "hits": len(hits),
-                    "full_docs_fetched": full_docs_fetched,
                     "weak_evidence": weak_evidence,
                 },
                 tokens_unavailable=True,
@@ -529,7 +514,9 @@ class UnisonBrainContextAdapter(AgentAdapter):
         )
         return (resp.text or "").strip()
 
-    async def _provision_tenant(self) -> tuple[str, str] | None:
+    async def _provision_tenant(self) -> tuple[str, str, str] | None:
+        """Returns (tenantId, userId, apiKey) where apiKey is a usk_ machine key
+        scoped to the provisioned tenant — use it directly for /v1/brain/context reads."""
         assert self._eval_client is not None
         try:
             resp = await self._eval_client.post(
@@ -543,10 +530,11 @@ class UnisonBrainContextAdapter(AgentAdapter):
             data = resp.json()
             tenant_id = str(data.get("tenantId") or "")
             user_id = str(data.get("userId") or "")
+            api_key = str(data.get("apiKey") or "")
             if not tenant_id or not user_id:
                 logger.warning("eval/provision returned no tenantId/userId", data=data)
                 return None
-            return tenant_id, user_id
+            return tenant_id, user_id, api_key
         except httpx.HTTPError as e:
             logger.warning("eval/provision error", error=str(e))
             return None

@@ -50,14 +50,10 @@ class Settings(BaseSettings):
     # Reader LLM for unison-brain-context: the model that synthesizes an answer from
     # the contextMd returned by GET /v1/brain/context. Defaults to gpt-4o-mini.
     context_reader_model: str = "gpt-4o-mini"
-    # When true, after GET /v1/brain/context the adapter fetches full doc bodies
-    # for the top CONTEXT_FULL_DOCS_K hits (default 5) via GET /v1/brain/doc and
-    # appends them to contextMd. Needed because /v1/brain/context returns ~160-char
-    # snippets optimised for interactive agent loops, not single-shot reader LLMs.
-    # Trade-off: substantially larger prompts; set to false for a retrieval-only
-    # baseline that measures context endpoint quality without this workaround.
-    context_fetch_full_docs: bool = True
-    context_full_docs_k: int = 5
+    # Number of top hits to retrieve from /v1/brain/context (k parameter).
+    # The server inlines full clipped bodies (4k/doc, 24k total) when
+    # includeBodies=true — no separate /v1/brain/doc fetches needed.
+    context_full_docs_k: int = 10
 
     # Anthropic (judge cost accounting)
     anthropic_api_key: str = ""

@@ -391,15 +391,16 @@ class UnisonBrainContextAdapter(AgentAdapter):
             # Optional: fetch full document bodies for top-k hits and append to
             # contextMd. /v1/brain/context returns ~160-char snippets tuned for
             # interactive agents; single-shot reader LLMs need the full body.
-            # Note: /system/facts/ paths ARE fetched — they contain extracted fact
-            # nodes that frequently hold the direct answer (e.g. "FACT [date]: X").
+            # Note: /system/facts/ paths return empty bodyMd from /v1/brain/doc
+            # (they exist only as vector chunks, not first-class documents). Skip
+            # them and scan up to CONTEXT_FULL_DOCS_K hits for real session docs.
             full_docs_fetched = 0
             if self.settings.context_fetch_full_docs and hits:
                 k = self.settings.context_full_docs_k
                 doc_parts: list[str] = ["\n\n---\n# Full document bodies (top hits)\n"]
                 for hit in hits[:k]:
                     path = (hit.get("doc") or hit).get("path", "")
-                    if not path:
+                    if not path or path.startswith("/system/facts/"):
                         continue
                     try:
                         doc_resp = await brain_client.get(

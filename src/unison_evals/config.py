@@ -23,6 +23,33 @@ class Settings(BaseSettings):
     # (memory benches) — no JWT needed. Required to run reproducible, isolated
     # benchmarks against the deployed (prod) app.
     unison_eval_secret: str = ""
+    # Dedicated JWT for GET /v1/brain/context reads in unison-brain-context adapter.
+    # When set, used in preference over UNISON_JWT. Optional: UNISON_JWT also works,
+    # or SUPABASE_JWT_SECRET enables auto-mint for local dev.
+    unison_eval_jwt: str = ""
+    # Local Supabase HS256 signing secret. When set, the unison-brain-context adapter
+    # auto-mints per-request JWTs for provisioned eval tenants (local dev only).
+    # NOTE: Requires Supabase CLI < 1.200 (HS256 JWT support). Newer Supabase CLI
+    # versions use ES256 JWKS and reject HS256 tokens — use UNISON_BRAIN_MACHINE_KEY
+    # instead when running against a local stack with Supabase CLI >= 1.200.
+    # NEVER set this against a production server.
+    supabase_jwt_secret: str = ""
+    # Machine API key (`usk_live_...`) for GET /v1/brain/context reads in
+    # unison-brain-context. Takes priority over all JWT paths. Required when the
+    # local Supabase stack uses ES256 JWKS (Supabase CLI >= ~1.200) which rejects
+    # HS256 auto-minted JWTs. When set together with UNISON_EVAL_TENANT_ID +
+    # UNISON_EVAL_USER_ID, the adapter skips per-question provisioning and uses the
+    # shared eval tenant for both seed and read (isolation via path-namespace).
+    # Workflow: provision once → insert usk_ key into api_keys table → set all three.
+    unison_brain_machine_key: str = ""
+    # Pre-provisioned eval tenant for machine-key mode (see UNISON_BRAIN_MACHINE_KEY).
+    # When set with UNISON_BRAIN_MACHINE_KEY, provision/teardown are skipped and all
+    # questions are seeded into this tenant under path-namespaced paths.
+    unison_eval_tenant_id: str = ""
+    unison_eval_user_id: str = ""
+    # Reader LLM for unison-brain-context: the model that synthesizes an answer from
+    # the contextMd returned by GET /v1/brain/context. Defaults to gpt-4o-mini.
+    context_reader_model: str = "gpt-4o-mini"
 
     # Anthropic (judge cost accounting)
     anthropic_api_key: str = ""

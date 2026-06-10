@@ -346,6 +346,51 @@ production knob, not a test-mode bypass. Requires `UNISON_EVAL_SECRET` or
 ingestion pipeline configuration. Used for A/B comparisons of brain pipeline
 variants.
 
+**unison-brain-context** (`src/unison_evals/memory_evals/adapters/unison_brain_context.py`):
+The new brain-only contract for the restructured Unison server (post brain-only-restructure
+PR). This adapter emulates a real SDK customer — it does not call any agent endpoint.
+
+Flow per question:
+
+1. `POST /v1/eval/provision` — create an ephemeral `is_eval` tenant + owner user
+   (auth: `X-Unison-Eval` header with `UNISON_EVAL_SECRET`).
+2. `POST /v1/eval/seed` — bulk-write + synchronously embed haystack docs into the
+   tenant's brain (same header). Bypasses the async extract pipeline; vectors are
+   ready immediately.
+3. `GET /v1/brain/context?q=<question>` — one-call retrieval: full hybrid search +
+   entity expansion, returned as `{contextMd, hits, entities, weakEvidence, ...}`.
+   Auth: `Authorization: Bearer <JWT>` resolved from (in priority order):
+   `UNISON_EVAL_JWT`, `UNISON_JWT`, or an auto-minted HS256 token when
+   `SUPABASE_JWT_SECRET` is configured (local dev only).
+4. Harness-owned reader LLM synthesizes an answer from `contextMd`. Model is
+   configurable via `CONTEXT_READER_MODEL` (default: `gpt-4o-mini`).
+5. `POST /v1/eval/teardown` — hard-delete the ephemeral tenant.
+
+This separation is intentional: the brain only retrieves — the answer generation
+happens entirely in the eval harness. This makes retrieval quality and generation
+quality orthogonally measurable, and ensures the server never generates answers
+for benchmarked questions (clean eval signal).
+
+Required env vars:
+- `UNISON_EVAL_SECRET` — for provision/seed/teardown on non-localhost servers.
+- One of `UNISON_EVAL_JWT`, `UNISON_JWT`, `SUPABASE_JWT_SECRET` — for the brain read.
+- `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY`) — for the reader LLM.
+
+To reproduce against a local Unison server running the `brain-only-restructure` branch:
+
+```bash
+# In the brain server's .env: UNISON_EVAL_LOCAL_BYPASS=1 + UNISON_LOCAL_EVAL_TENANT_ID
+# + SUPABASE_JWT_SECRET=super-secret-jwt-token-with-at-least-32-characters-long
+SUPABASE_JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long" \
+UNISON_API_URL=http://localhost:3001 \
+UNISON_EVAL_SECRET=<your-secret> \
+  uv run unison-evals run \
+    --systems unison-brain-context \
+    --dataset longmemeval \
+    --track agent-e2e \
+    --limit 24 --dev
+```
+
 ---
 
 ## 7. Reproduction

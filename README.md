@@ -55,6 +55,7 @@ Every system receives the identical per-question document corpus via `seed_docs`
 |---|---|
 | `unison-agent` | Ingests docs into a brain via `seedDocs`; retrieves only what's relevant for the question |
 | `unison-agent-pipeline` | Same agent, different ingestion pipeline configuration |
+| `unison-brain-context` | New brain-only contract (post restructure): provision→seed via `/v1/eval/seed`→`GET /v1/brain/context`→reader LLM answers |
 
 The **headline metric** is `pass_rate` — the fraction of questions the agent answered correctly per the LLM judge.
 
@@ -132,6 +133,7 @@ open http://localhost:3000/runs/new
 ## How the comparison stays honest
 
 - **Same production agent loop.** The `unison-agent` adapter calls the `/api/rest/agents/eval-turn` endpoint, which runs the **same `runAgent` loop that ships in production** — retrieve → reason → answer, including the counting-verification gate (no eval-only forks in the answer path). Track 2 disables the brain/FS/workspace tools via the `oracleContext` request flag. *One honest caveat:* the eval seeds each question's brain **synchronously** (`extractFromDocument → recordFact`), which runs the same extraction logic as production but **skips the asynchronous production ingestion pipeline** (the signal notability gate, reconcile, and compaction). So the *answering* path is production; the *brain-building* path is a faster eval-time shortcut over identical extraction.
+- **New brain-context contract.** The `unison-brain-context` adapter reflects the post-restructure server that removed the agent endpoint. It is an SDK-customer emulation: provision → seed via `/v1/eval/seed` → `GET /v1/brain/context` → the *harness* runs a reader LLM over `contextMd`. The server never generates an answer — retrieval and generation are fully decoupled. See [METHODOLOGY.md §6](./METHODOLOGY.md#6-adapters) for the full contract.
 - **Fixed model + temperature.** Judge model pinned per release (`JUDGE_MODEL` env var). All systems use temperature=0 where possible.
 - **Fixed dataset versions.** Datasets are downloaded from HuggingFace at a pinned commit hash and cached locally.
 - **All numbers reproducible.** Every run writes a JSON artifact with the exact dataset hash, model versions, timestamps, and per-question scores. Re-running the same config on the same hardware gets within ±2%.

@@ -20,7 +20,7 @@ from unison_evals.types import Document
 
 
 def test_mint_hs256_jwt_structure() -> None:
-    token = _mint_hs256_jwt("user-123", "tenant-456", "secret", ttl=300)
+    token = _mint_hs256_jwt("user-123", "workspace-456", "secret", ttl=300)
     parts = token.split(".")
     assert len(parts) == 3
     # Decode header + payload (no padding needed — b64url decode adds it)
@@ -35,7 +35,7 @@ def test_mint_hs256_jwt_structure() -> None:
     assert header["alg"] == "HS256"
     assert payload["sub"] == "user-123"
     assert payload["role"] == "authenticated"
-    assert payload["app_metadata"]["tenant_id"] == "tenant-456"
+    assert payload["app_metadata"]["workspace_id"] == "workspace-456"
     # Token should not be expired right after minting.
     assert payload["exp"] > int(time.time())
 
@@ -106,9 +106,9 @@ async def test_answer_e2e_flow(httpx_mock, monkeypatch) -> None:
     monkeypatch.setattr(s, "unison_jwt", "")
     monkeypatch.setattr(s, "unison_eval_jwt", "")
     monkeypatch.setattr(s, "openai_api_key", "sk-test")
-    # Force the per-question provision path (not the shared-tenant machine-key path).
+    # Force the per-question provision path (not the shared-workspace machine-key path).
     monkeypatch.setattr(s, "unison_brain_machine_key", "")
-    monkeypatch.setattr(s, "unison_eval_tenant_id", "")
+    monkeypatch.setattr(s, "unison_eval_workspace_id", "")
     monkeypatch.setattr(s, "unison_eval_user_id", "")
     # Disable full-doc fetching so mock HTTP responses stay simple.
     monkeypatch.setattr(s, "context_fetch_full_docs", False)
@@ -120,7 +120,7 @@ async def test_answer_e2e_flow(httpx_mock, monkeypatch) -> None:
         method="POST",
         url="http://localhost:3001/v1/eval/provision",
         status_code=200,
-        json={"tenantId": "tid-1", "userId": "uid-1"},
+        json={"workspaceId": "tid-1", "userId": "uid-1"},
     )
     # seed
     httpx_mock.add_response(
@@ -195,7 +195,7 @@ async def test_answer_oracle_track(httpx_mock, monkeypatch) -> None:
     monkeypatch.setattr(s, "unison_jwt", "")
     monkeypatch.setattr(s, "unison_eval_jwt", "")
     monkeypatch.setattr(s, "unison_brain_machine_key", "")
-    monkeypatch.setattr(s, "unison_eval_tenant_id", "")
+    monkeypatch.setattr(s, "unison_eval_workspace_id", "")
     monkeypatch.setattr(s, "unison_eval_user_id", "")
 
     httpx_mock.add_response(url="http://localhost:3001/health", status_code=200, json={"ok": True})
@@ -236,7 +236,7 @@ async def test_answer_rejects_both_oracle_and_seed(httpx_mock, monkeypatch) -> N
     monkeypatch.setattr(s, "unison_jwt", "")
     monkeypatch.setattr(s, "unison_eval_jwt", "")
     monkeypatch.setattr(s, "unison_brain_machine_key", "")
-    monkeypatch.setattr(s, "unison_eval_tenant_id", "")
+    monkeypatch.setattr(s, "unison_eval_workspace_id", "")
     monkeypatch.setattr(s, "unison_eval_user_id", "")
 
     httpx_mock.add_response(url="http://localhost:3001/health", status_code=200, json={"ok": True})
@@ -270,9 +270,9 @@ async def test_answer_brain_context_401(httpx_mock, monkeypatch) -> None:
     )
     monkeypatch.setattr(s, "unison_jwt", "")
     monkeypatch.setattr(s, "unison_eval_jwt", "")
-    # Force the per-question provision path (not the shared-tenant machine-key path).
+    # Force the per-question provision path (not the shared-workspace machine-key path).
     monkeypatch.setattr(s, "unison_brain_machine_key", "")
-    monkeypatch.setattr(s, "unison_eval_tenant_id", "")
+    monkeypatch.setattr(s, "unison_eval_workspace_id", "")
     monkeypatch.setattr(s, "unison_eval_user_id", "")
     # Disable full-doc fetching so mock HTTP responses stay simple.
     monkeypatch.setattr(s, "context_fetch_full_docs", False)
@@ -282,7 +282,7 @@ async def test_answer_brain_context_401(httpx_mock, monkeypatch) -> None:
         method="POST",
         url="http://localhost:3001/v1/eval/provision",
         status_code=200,
-        json={"tenantId": "t1", "userId": "u1"},
+        json={"workspaceId": "t1", "userId": "u1"},
     )
     httpx_mock.add_response(
         method="POST",

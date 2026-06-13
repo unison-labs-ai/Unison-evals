@@ -1,4 +1,4 @@
-"""Seed Letta's filesystem-agent corpus into a fresh Unison /private/sources/eval/context-bench/ tenant.
+"""Seed Letta's filesystem-agent corpus into a fresh Unison /private/sources/eval/context-bench/ workspace.
 
 The 10 fictional text files (people / pets / vehicles / addresses /
 bank_accounts / credit_cards / employments / insurance_policies /
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..tau_bench.brain_client import BrainPage, seed_pages_sync, wipe_tenant_sync
+from ..tau_bench.brain_client import BrainPage, seed_pages_sync, wipe_workspace_sync
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 CORPUS_DIR = (
@@ -94,16 +94,16 @@ def _build_pages() -> list[BrainPage]:
 def corpus_seed_docs() -> list[dict]:
     """The fixed Context-Bench corpus as eval-turn `seedDocs` entries
     ({path, body, kind}). Used by the per-run lifecycle to seed the ephemeral
-    tenant once over the API (no direct DB access)."""
+    workspace once over the API (no direct DB access)."""
     return [{"path": p.path, "body": p.body_md, "kind": p.kind} for p in _build_pages()]
 
 
-def fresh_tenant(tenant_id: str, user_id: str) -> tuple[int, int]:
-    """Wipe the tenant + seed the Context-Bench corpus from scratch.
+def fresh_workspace(workspace_id: str, user_id: str) -> tuple[int, int]:
+    """Wipe the workspace + seed the Context-Bench corpus from scratch.
 
     Returns (wiped_doc_count, seeded_page_count)."""
-    counts = wipe_tenant_sync(tenant_id)
+    counts = wipe_workspace_sync(workspace_id)
     wiped = counts.get("cortex_documents", 0)
     pages = _build_pages()
-    seeded = seed_pages_sync(tenant_id, user_id, pages)
+    seeded = seed_pages_sync(workspace_id, user_id, pages)
     return wiped, seeded

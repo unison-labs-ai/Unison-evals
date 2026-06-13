@@ -1,7 +1,7 @@
 """Mode B agent — drives the τ-bench multi-turn loop against Unison.
 
 For each task:
-  1. Wipe + reseed brain under the eval tenant.
+  1. Wipe + reseed brain under the eval workspace.
   2. Open a fresh Unison session.
   3. Loop:
        a. POST /api/rest/agents/eval-turn  (question = current user message)
@@ -39,14 +39,14 @@ class UnisonModeBAgent(Agent):
     def __init__(
         self,
         unison_api_url: str,
-        tenant_id: str,
+        workspace_id: str,
         user_id: str,
         model: str = "claude-sonnet-4-5",
         timeout: float = 600.0,
         trajectory_dir: Path | None = None,
     ):
         self.api_url = unison_api_url.rstrip("/")
-        self.tenant_id = tenant_id
+        self.workspace_id = workspace_id
         self.user_id = user_id
         self.model = model
         self.timeout = timeout
@@ -74,13 +74,13 @@ class UnisonModeBAgent(Agent):
         initial_user_msg = reset_resp.observation
         info: dict[str, Any] = reset_resp.info.model_dump()
 
-        # 1. Wipe every tenant-scoped table the system touches, then reseed
+        # 1. Wipe every workspace-scoped table the system touches, then reseed
         # brain. This gives task N a true iid starting state — no leaked facts,
         # messages, or pending jobs from tasks 1..N-1.
-        wipe_counts = brain_client.wipe_tenant_sync(self.tenant_id)
+        wipe_counts = brain_client.wipe_workspace_sync(self.workspace_id)
         wiped_total = sum(wipe_counts.values())
         pages = md_overlay.build_seed_pages(env.data)
-        seeded = brain_client.seed_pages_sync(self.tenant_id, self.user_id, pages)
+        seeded = brain_client.seed_pages_sync(self.workspace_id, self.user_id, pages)
         print(
             f"  [mode-b] wiped {wiped_total} rows; seeded {seeded} fresh",
             flush=True,
@@ -88,7 +88,7 @@ class UnisonModeBAgent(Agent):
 
         # 2. Prime session
         session_id = str(uuid.uuid4())
-        snapshot_before = brain_client.snapshot_wiki_sync(self.tenant_id)
+        snapshot_before = brain_client.snapshot_wiki_sync(self.workspace_id)
         parsed_before = md_overlay.parse_snapshot(snapshot_before)
 
         # The Unison agent has no per-call system-prompt slot, so we inject
@@ -135,7 +135,7 @@ class UnisonModeBAgent(Agent):
                         # Skip Memory-v2 extract.turn jobs — iid evals must
                         # not accumulate facts across tasks. Server-side
                         # support is the Unison V2 ask (gracefully ignored
-                        # by older builds; we wipe tenant state anyway).
+                        # by older builds; we wipe workspace state anyway).
                         "memoryMode": "fresh",
                     },
                 )
@@ -157,7 +157,7 @@ class UnisonModeBAgent(Agent):
             )
 
             # 3b. Snapshot brain
-            snapshot_after = brain_client.snapshot_wiki_sync(self.tenant_id)
+            snapshot_after = brain_client.snapshot_wiki_sync(self.workspace_id)
             parsed_after = md_overlay.parse_snapshot(snapshot_after)
 
             # 3c. Translate brain diff → tau_bench Actions
@@ -231,7 +231,7 @@ class UnisonModeBAgent(Agent):
         # post-hoc.
         if self.trajectory_dir is not None:
             try:
-                trace = brain_client.dump_trajectory_sync(self.tenant_id, session_id)
+                trace = brain_client.dump_trajectory_sync(self.workspace_id, session_id)
             except Exception as e:
                 print(f"  [mode-b] trajectory dump failed: {e}", flush=True)
                 trace = []

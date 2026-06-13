@@ -434,12 +434,12 @@ class _NoOpJudge:
     "--manifest",
     required=True,
     type=click.Path(dir_okay=False, path_type=Path),
-    help="Manifest JSON to write/update (question_id -> persistent tenant_id).",
+    help="Manifest JSON to write/update (question_id -> persistent workspace_id).",
 )
 @click.option("--system", default="unison-agent", show_default=True)
 def preingest(dataset: str, limit: int | None, manifest: Path, system: str) -> None:
-    """Ingest each question's haystack ONCE into a persistent eval tenant and
-    record question_id -> tenant_id in the manifest. Selection honours the same
+    """Ingest each question's haystack ONCE into a persistent eval workspace and
+    record question_id -> workspace_id in the manifest. Selection honours the same
     EVAL_SEED / EVAL_STRATIFIED / EVAL_SPLIT env as `run`. Run the server with
     AGENT_WAIT_GRAPH=1 so the full extract->promote->facts graph is built.
 
@@ -454,7 +454,7 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
     import os
 
     from .memory_evals.datasets import get_dataset
-    from .memory_evals.preingest import load_manifest, save_manifest, tenant_for
+    from .memory_evals.preingest import load_manifest, save_manifest, workspace_for
     from .types import BrainQuestion
 
     if system not in ADAPTER_REGISTRY:
@@ -496,18 +496,18 @@ async def _preingest(dataset: str, limit: int | None, manifest_path: Path, syste
         nonlocal done, skipped, failed
         key = q.effective_corpus_key
         async with lock:
-            if tenant_for(manifest, key) or key in claimed:
+            if workspace_for(manifest, key) or key in claimed:
                 skipped += 1
                 return
             claimed.add(key)
         async with sem:
-            tenant = await adapter.preingest_question(q.query, q.corpus, key)
+            workspace = await adapter.preingest_question(q.query, q.corpus, key)
         async with lock:
-            if tenant:
-                manifest["questions"][key] = tenant
+            if workspace:
+                manifest["questions"][key] = workspace
                 save_manifest(manifest_path, manifest)  # incremental — crash-safe
                 done += 1
-                console.print(f"[green]OK[/] [{done + failed}/{total}] {key} -> {tenant}")
+                console.print(f"[green]OK[/] [{done + failed}/{total}] {key} -> {workspace}")
             else:
                 claimed.discard(key)
                 failed += 1

@@ -42,7 +42,7 @@ context_bench/
 ```
 
 Per-row protocol:
-1. Wipe + reseed the eval tenant brain (10 .txt files + a generic SCHEMA.md).
+1. Wipe + reseed the eval workspace brain (10 .txt files + a generic SCHEMA.md).
 2. POST the question to `/api/rest/agents/eval-turn` with `memoryMode: "fresh"` (no Memory-v2 carryover across rows).
 3. Capture the agent's final text answer.
 4. Grade with Letta's exact rubric + judge model.
@@ -72,7 +72,7 @@ Reuses the τ-bench `brain_client.py` for seed / wipe — no duplication.
 
 Prerequisites:
 - Unison API up at `$UNISON_API_URL` (default `http://localhost:3001`)
-- Eval tenant provisioned (see your Unison server `.env`)
+- Eval workspace provisioned (see your Unison server `.env`)
 - `OPENAI_API_KEY` (judge + reading the dataset)
 - `ANTHROPIC_API_KEY` (Sonnet agent inside Unison)
 - `git submodule update --init vendor/letta-evals` (corpus + dataset + rubric)

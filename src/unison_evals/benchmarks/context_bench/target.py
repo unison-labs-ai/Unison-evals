@@ -1,15 +1,15 @@
 """Thin HTTP client for Unison's `/api/rest/agents/eval-turn`.
 
 Context-Bench uses a SINGLE fixed corpus (11 files) shared by all 100
-questions, so isolation is **per-run** (one ephemeral tenant per run), not per-question:
+questions, so isolation is **per-run** (one ephemeral workspace per run), not per-question:
 
-  setup()  → provision one ephemeral `is_eval` tenant, seed the corpus
+  setup()  → provision one ephemeral `is_eval` workspace, seed the corpus
              into /private/sources/eval/context-bench/ once.
-  ask(q)   → run one question against that tenant with memoryMode="fresh"
+  ask(q)   → run one question against that workspace with memoryMode="fresh"
              (no extraction residue between questions; corpus stays put).
-  close()  → hard-delete the ephemeral tenant.
+  close()  → hard-delete the ephemeral workspace.
 
-No dedicated tenant, no cross-run residue — the secret
+No dedicated workspace, no cross-run residue — the secret
 (`UNISON_EVAL_SECRET`, sent as X-Unison-Eval) is the only auth. On a
 localhost server with UNISON_EVAL_LOCAL_BYPASS the secret is optional.
 """
@@ -57,23 +57,23 @@ class UnisonContextBenchTarget:
         if self.eval_secret:
             headers["X-Unison-Eval"] = self.eval_secret
         self._client = httpx.Client(base_url=self.api_url, headers=headers, timeout=timeout)
-        self.tenant_id: str | None = None
+        self.workspace_id: str | None = None
         self.seeded_pages = 0
 
     def setup(self) -> None:
-        """Provision a fresh ephemeral tenant and seed the fixed corpus once."""
+        """Provision a fresh ephemeral workspace and seed the fixed corpus once."""
         prov = self._client.post("/api/rest/agents/eval/provision", json={"label": "context-bench"})
         prov.raise_for_status()
-        self.tenant_id = str(prov.json()["tenantId"])
+        self.workspace_id = str(prov.json()["workspaceId"])
 
         docs = seed.corpus_seed_docs()
         # One seed-bearing turn writes + embeds the corpus server-side. The agent
-        # answer ("READY") is discarded; the docs persist in the tenant for every
+        # answer ("READY") is discarded; the docs persist in the workspace for every
         # subsequent ask(). Cheap throwaway model keeps the seed turn near-free.
         seed_resp = self._client.post(
             "/api/rest/agents/eval-turn",
             json={
-                "tenantId": self.tenant_id,
+                "workspaceId": self.workspace_id,
                 "question": "Reply with the single word READY.",
                 "model": _SEED_MODEL,
                 "memoryMode": "fresh",
@@ -84,7 +84,7 @@ class UnisonContextBenchTarget:
         self.seeded_pages = int(seed_resp.json().get("seedDocsCount") or len(docs))
 
     def ask(self, question: str) -> TargetAnswer:
-        if self.tenant_id is None:
+        if self.workspace_id is None:
             raise RuntimeError("setup() must be called before ask()")
 
         framing = (
@@ -98,7 +98,7 @@ class UnisonContextBenchTarget:
 
         t0 = time.monotonic()
         body: dict = {
-            "tenantId": self.tenant_id,
+            "workspaceId": self.workspace_id,
             "question": framing,
             # Each row must be iid — skip Memory-v2 extract.turn.
             "memoryMode": "fresh",
@@ -122,15 +122,15 @@ class UnisonContextBenchTarget:
         )
 
     def close(self) -> None:
-        """Hard-delete the ephemeral tenant, then close the client. Best-effort
+        """Hard-delete the ephemeral workspace, then close the client. Best-effort
         teardown so a failed delete never masks the run's results."""
         try:
-            if self.tenant_id is not None:
+            if self.workspace_id is not None:
                 self._client.post(
-                    "/api/rest/agents/eval/teardown", json={"tenantId": self.tenant_id}
+                    "/api/rest/agents/eval/teardown", json={"workspaceId": self.workspace_id}
                 )
         except httpx.HTTPError:
             pass
         finally:
             self._client.close()
-            self.tenant_id = None
+            self.workspace_id = None

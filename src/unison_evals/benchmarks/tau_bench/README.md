@@ -77,7 +77,7 @@ Useful flags either runner accepts:
 | `--model claude-sonnet-4-6` | Override agent model (provider auto-derived for claude-* / gpt-* / gemini-*) |
 | `--provider anthropic` | Force litellm provider |
 
-Mode B also needs Unison running locally with the eval tenant configured (see `<path-to-your-unison-server>/.env`'s `UNISON_LOCAL_EVAL_TENANT_ID` / `UNISON_LOCAL_EVAL_USER_ID`).
+Mode B also needs Unison running locally with the eval workspace configured (see `<path-to-your-unison-server>/.env`'s `UNISON_LOCAL_EVAL_WORKSPACE_ID` / `UNISON_LOCAL_EVAL_USER_ID`).
 
 ## Where results land
 
@@ -107,4 +107,4 @@ results/tau-bench/
 | `mode_b_agent.py` | `UnisonModeBAgent(tau_bench.Agent)` — multi-turn loop driving Unison via `/api/rest/agents/eval-turn` |
 | `md_overlay.py` | `env.data` ↔ `/private/taubench/<table>/<id>.md` codec (JSON-in-fenced-block, round-trip-safe for position-sensitive lists) |
 | `action_translator.py` | Brain-state diff → `tau_bench.Action` dispatcher (multiset diff over `items[]`; handles cancel / exchange / return / modify variants) |
-| `brain_client.py` | Postgres-direct seed / snapshot / wipe / trajectory dump against the eval tenant |
+| `brain_client.py` | Postgres-direct seed / snapshot / wipe / trajectory dump against the eval workspace |

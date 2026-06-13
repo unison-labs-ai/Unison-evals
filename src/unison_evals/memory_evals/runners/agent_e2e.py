@@ -149,7 +149,7 @@ class AgentE2ERunner:
                     adapter = adapters[sys_name]
                     # Track 3: pass per-question corpus as seed_docs; no oracle_context.
                     # question_id + corpus_key let the adapter reuse a pre-ingested
-                    # tenant (corpus_key shares one seed across same-corpus questions).
+                    # workspace (corpus_key shares one seed across same-corpus questions).
                     answer = await adapter.answer(
                         q.query,
                         seed_docs=q.corpus,

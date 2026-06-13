@@ -42,7 +42,7 @@ class AgentAdapter(ABC):
         """Answer one question.
 
         question_id (optional): the dataset id, used to reuse a pre-ingested
-        persistent tenant from the manifest when one exists.
+        persistent workspace from the manifest when one exists.
         corpus_key (optional): stable key for this question's CORPUS. Questions
         sharing a corpus (e.g. LOCOMO) share a key so the brain is seeded once
         per corpus and reused. Defaults to question_id.

@@ -352,10 +352,10 @@ PR). This adapter emulates a real SDK customer — it does not call any agent en
 
 Flow per question:
 
-1. `POST /v1/eval/provision` — create an ephemeral `is_eval` tenant + owner user
+1. `POST /v1/eval/provision` — create an ephemeral `is_eval` workspace + owner user
    (auth: `X-Unison-Eval` header with `UNISON_EVAL_SECRET`).
 2. `POST /v1/eval/seed` — bulk-write + synchronously embed haystack docs into the
-   tenant's brain (same header). Bypasses the async extract pipeline; vectors are
+   workspace's brain (same header). Bypasses the async extract pipeline; vectors are
    ready immediately.
 3. `GET /v1/brain/context?q=<question>` — one-call retrieval: full hybrid search +
    entity expansion, returned as `{contextMd, hits, entities, weakEvidence, ...}`.
@@ -364,7 +364,7 @@ Flow per question:
    `SUPABASE_JWT_SECRET` is configured (local dev only).
 4. Harness-owned reader LLM synthesizes an answer from `contextMd`. Model is
    configurable via `CONTEXT_READER_MODEL` (default: `gpt-4o-mini`).
-5. `POST /v1/eval/teardown` — hard-delete the ephemeral tenant.
+5. `POST /v1/eval/teardown` — hard-delete the ephemeral workspace.
 
 This separation is intentional: the brain only retrieves — the answer generation
 happens entirely in the eval harness. This makes retrieval quality and generation
@@ -379,7 +379,7 @@ Required env vars:
 To reproduce against a local Unison server running the `brain-only-restructure` branch:
 
 ```bash
-# In the brain server's .env: UNISON_EVAL_LOCAL_BYPASS=1 + UNISON_LOCAL_EVAL_TENANT_ID
+# In the brain server's .env: UNISON_EVAL_LOCAL_BYPASS=1 + UNISON_LOCAL_EVAL_WORKSPACE_ID
 # + SUPABASE_JWT_SECRET=super-secret-jwt-token-with-at-least-32-characters-long
 SUPABASE_JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long" \
 UNISON_API_URL=http://localhost:3001 \

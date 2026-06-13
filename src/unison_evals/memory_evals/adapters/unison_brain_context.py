@@ -1,7 +1,7 @@
 """Unison brain-context adapter — the new SDK-customer contract.
 
 Flow per question:
-  1. POST /v1/eval/provision   → {tenantId, userId, apiKey}
+  1. POST /v1/eval/provision   → {workspaceId, userId, apiKey}
   2. POST /v1/eval/seed        → bulk-write + synchronously embed haystack docs
   3. GET  /v1/brain/context?q=&pathPrefix=<ns>&includeBodies=true&k=10
                               → {contextMd, hits, entities, weakEvidence, …}
@@ -13,8 +13,8 @@ Flow per question:
 Auth:
   - Steps 1/2/5 use X-Unison-Eval (UNISON_EVAL_SECRET).
   - Step 3 uses the apiKey returned by provision (usk_ machine key bound to the
-    provisioned tenant). Falls back to UNISON_BRAIN_MACHINE_KEY / UNISON_EVAL_JWT /
-    UNISON_JWT / auto-minted HS256 JWT when in shared-tenant or preingest mode.
+    provisioned workspace). Falls back to UNISON_BRAIN_MACHINE_KEY / UNISON_EVAL_JWT /
+    UNISON_JWT / auto-minted HS256 JWT when in shared-workspace or preingest mode.
 
 Name: "unison-brain-context"
 
@@ -71,7 +71,7 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def _mint_hs256_jwt(user_id: str, tenant_id: str, secret: str, ttl: int = 300) -> str:
+def _mint_hs256_jwt(user_id: str, workspace_id: str, secret: str, ttl: int = 300) -> str:
     """Mint a minimal Supabase-accepted HS256 JWT for local-dev eval use only."""
     now = int(time.time())
     header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
@@ -83,7 +83,7 @@ def _mint_hs256_jwt(user_id: str, tenant_id: str, secret: str, ttl: int = 300) -
                 "aud": "authenticated",
                 "iat": now,
                 "exp": now + ttl,
-                "app_metadata": {"tenant_id": tenant_id},
+                "app_metadata": {"workspace_id": workspace_id},
             }
         ).encode()
     )
@@ -196,55 +196,55 @@ class UnisonBrainContextAdapter(AgentAdapter):
                 error="seed_docs and oracle_context are mutually exclusive",
             )
 
-        # oracle track: skip provision/seed, call context with no tenant override
+        # oracle track: skip provision/seed, call context with no workspace override
         if oracle_context is not None:
             return await self._answer_oracle(question, oracle_context)
 
         cache_key = corpus_key or question_id
 
         # Preingest manifest reuse
-        preingested_tenant: str | None = None
+        preingested_workspace: str | None = None
         preingested_user: str | None = None
         if self._manifest is not None and cache_key is not None:
             entry = self._manifest.get("questions", {}).get(cache_key)
             if isinstance(entry, dict):
-                preingested_tenant = entry.get("tenantId")
+                preingested_workspace = entry.get("workspaceId")
                 preingested_user = entry.get("userId")
             elif isinstance(entry, str):
-                # Legacy: manifest stored only tenantId as string
-                preingested_tenant = entry
+                # Legacy: manifest stored only workspaceId as string
+                preingested_workspace = entry
 
-        # Machine-key + shared-tenant fast path: UNISON_BRAIN_MACHINE_KEY is set
-        # together with UNISON_EVAL_TENANT_ID / UNISON_EVAL_USER_ID. Skip per-question
-        # provision and teardown; seed into the shared tenant under a question-namespaced
+        # Machine-key + shared-workspace fast path: UNISON_BRAIN_MACHINE_KEY is set
+        # together with UNISON_EVAL_WORKSPACE_ID / UNISON_EVAL_USER_ID. Skip per-question
+        # provision and teardown; seed into the shared workspace under a question-namespaced
         # path so queries from one question don't bleed into another.
         if (
             self.settings.unison_brain_machine_key
-            and self.settings.unison_eval_tenant_id
+            and self.settings.unison_eval_workspace_id
             and self.settings.unison_eval_user_id
-            and not preingested_tenant
+            and not preingested_workspace
         ):
-            preingested_tenant = self.settings.unison_eval_tenant_id
+            preingested_workspace = self.settings.unison_eval_workspace_id
             preingested_user = self.settings.unison_eval_user_id
 
         start = time.perf_counter()
 
-        if preingested_tenant and preingested_user:
+        if preingested_workspace and preingested_user:
             if not seed_docs:
                 # Pre-seeded (manifest or repeated oracle call) — query only.
                 return await self._query_context(
                     question=question,
-                    tenant_id=preingested_tenant,
+                    workspace_id=preingested_workspace,
                     user_id=preingested_user,
                     start=start,
                     seed_docs_count=0,
                     embed_ms=0.0,
                 )
-            # Shared-tenant mode: seed into the shared tenant, then query.
+            # Shared-workspace mode: seed into the shared workspace, then query.
             docs_to_seed = seed_docs or []
             ns = hashlib.sha256(question.encode()).hexdigest()[:10]
             seed_result = await self._seed(
-                tenant_id=preingested_tenant,
+                workspace_id=preingested_workspace,
                 user_id=preingested_user,
                 docs=[
                     {
@@ -261,11 +261,11 @@ class UnisonBrainContextAdapter(AgentAdapter):
                     cost_usd=0.0,
                     latency_ms=(time.perf_counter() - start) * 1000.0,
                     raw={},
-                    error="seed failed (shared-tenant mode)",
+                    error="seed failed (shared-workspace mode)",
                 )
             return await self._query_context(
                 question=question,
-                tenant_id=preingested_tenant,
+                workspace_id=preingested_workspace,
                 user_id=preingested_user,
                 start=start,
                 seed_docs_count=seed_result.get("docsWritten", len(docs_to_seed)),
@@ -274,21 +274,21 @@ class UnisonBrainContextAdapter(AgentAdapter):
             )
 
         # Slow path: provision → seed → query → (maybe) teardown
-        provision = await self._provision_tenant()
+        provision = await self._provision_workspace()
         if provision is None:
             return AdapterResult(
                 answer="",
                 cost_usd=0.0,
                 latency_ms=(time.perf_counter() - start) * 1000.0,
                 raw={},
-                error="failed to provision ephemeral eval tenant",
+                error="failed to provision ephemeral eval workspace",
             )
-        tenant_id, user_id, api_key = provision
+        workspace_id, user_id, api_key = provision
 
         docs_to_seed = seed_docs or []
         ns = hashlib.sha256(question.encode()).hexdigest()[:10]
         seed_result = await self._seed(
-            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             user_id=user_id,
             docs=[
                 {
@@ -300,7 +300,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
             ],
         )
         if seed_result is None:
-            await self._teardown_tenant(tenant_id)
+            await self._teardown_workspace(workspace_id)
             return AdapterResult(
                 answer="",
                 cost_usd=0.0,
@@ -311,7 +311,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
 
         result = await self._query_context(
             question=question,
-            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             user_id=user_id,
             start=start,
             seed_docs_count=seed_result.get("docsWritten", len(docs_to_seed)),
@@ -323,13 +323,13 @@ class UnisonBrainContextAdapter(AgentAdapter):
         # Save to manifest if pre-ingest mode
         if self._manifest is not None and self._manifest_path is not None and cache_key is not None:
             self._manifest.setdefault("questions", {})[cache_key] = {
-                "tenantId": tenant_id,
+                "workspaceId": workspace_id,
                 "userId": user_id,
             }
             save_manifest(self._manifest_path, self._manifest)
-            # Keep the tenant — it's cached for future reuse.
+            # Keep the workspace — it's cached for future reuse.
         else:
-            await self._teardown_tenant(tenant_id)
+            await self._teardown_workspace(workspace_id)
 
         return result
 
@@ -349,7 +349,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
     async def _query_context(
         self,
         question: str,
-        tenant_id: str,
+        workspace_id: str,
         user_id: str,
         start: float,
         seed_docs_count: int,
@@ -362,9 +362,9 @@ class UnisonBrainContextAdapter(AgentAdapter):
         includeBodies=true instructs the server to inline full clipped doc bodies
         (4k/doc, 24k total) directly into contextMd — no separate /v1/brain/doc
         fetches needed.  pathPrefix scopes retrieval to the per-question namespace
-        so docs from other questions in the same shared tenant don't bleed in.
+        so docs from other questions in the same shared workspace don't bleed in.
         """
-        bearer = api_key or self._resolve_brain_jwt(user_id, tenant_id)
+        bearer = api_key or self._resolve_brain_jwt(user_id, workspace_id)
         brain_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {bearer}",
@@ -435,7 +435,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
         finally:
             await brain_client.aclose()
 
-    def _resolve_brain_jwt(self, user_id: str, tenant_id: str) -> str:
+    def _resolve_brain_jwt(self, user_id: str, workspace_id: str) -> str:
         """Return the best available bearer token for GET /v1/brain/context reads.
 
         Priority:
@@ -457,7 +457,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
             return self.settings.unison_jwt
         # 4. Auto-mint local JWT (local dev only, requires SUPABASE_JWT_SECRET).
         if self.settings.supabase_jwt_secret:
-            return _mint_hs256_jwt(user_id, tenant_id, self.settings.supabase_jwt_secret)
+            return _mint_hs256_jwt(user_id, workspace_id, self.settings.supabase_jwt_secret)
         raise RuntimeError(
             "No bearer token available for /v1/brain/context. "
             "Set UNISON_BRAIN_MACHINE_KEY, UNISON_EVAL_JWT, UNISON_JWT, or SUPABASE_JWT_SECRET."
@@ -514,9 +514,9 @@ class UnisonBrainContextAdapter(AgentAdapter):
         )
         return (resp.text or "").strip()
 
-    async def _provision_tenant(self) -> tuple[str, str, str] | None:
-        """Returns (tenantId, userId, apiKey) where apiKey is a usk_ machine key
-        scoped to the provisioned tenant — use it directly for /v1/brain/context reads."""
+    async def _provision_workspace(self) -> tuple[str, str, str] | None:
+        """Returns (workspaceId, userId, apiKey) where apiKey is a usk_ machine key
+        scoped to the provisioned workspace — use it directly for /v1/brain/context reads."""
         assert self._eval_client is not None
         try:
             resp = await self._eval_client.post(
@@ -528,20 +528,20 @@ class UnisonBrainContextAdapter(AgentAdapter):
                 )
                 return None
             data = resp.json()
-            tenant_id = str(data.get("tenantId") or "")
+            workspace_id = str(data.get("workspaceId") or "")
             user_id = str(data.get("userId") or "")
             api_key = str(data.get("apiKey") or "")
-            if not tenant_id or not user_id:
-                logger.warning("eval/provision returned no tenantId/userId", data=data)
+            if not workspace_id or not user_id:
+                logger.warning("eval/provision returned no workspaceId/userId", data=data)
                 return None
-            return tenant_id, user_id, api_key
+            return workspace_id, user_id, api_key
         except httpx.HTTPError as e:
             logger.warning("eval/provision error", error=str(e))
             return None
 
     async def _seed(
         self,
-        tenant_id: str,
+        workspace_id: str,
         user_id: str,
         docs: list[dict[str, str]],
     ) -> dict[str, Any] | None:
@@ -551,7 +551,7 @@ class UnisonBrainContextAdapter(AgentAdapter):
         try:
             resp = await self._eval_client.post(
                 "/v1/eval/seed",
-                json={"tenantId": tenant_id, "userId": user_id, "docs": docs},
+                json={"workspaceId": workspace_id, "userId": user_id, "docs": docs},
             )
             if resp.status_code != 200:
                 logger.warning("eval/seed failed", status=resp.status_code, body=resp.text[:300])
@@ -561,16 +561,16 @@ class UnisonBrainContextAdapter(AgentAdapter):
             logger.warning("eval/seed error", error=str(e))
             return None
 
-    async def _teardown_tenant(self, tenant_id: str) -> None:
+    async def _teardown_workspace(self, workspace_id: str) -> None:
         assert self._eval_client is not None
         try:
-            resp = await self._eval_client.post("/v1/eval/teardown", json={"tenantId": tenant_id})
+            resp = await self._eval_client.post("/v1/eval/teardown", json={"workspaceId": workspace_id})
             if resp.status_code != 200:
                 logger.warning(
                     "eval/teardown failed", status=resp.status_code, body=resp.text[:300]
                 )
         except httpx.HTTPError as e:
-            logger.warning("eval/teardown error", tenant=tenant_id, error=str(e))
+            logger.warning("eval/teardown error", workspace=workspace_id, error=str(e))
 
     async def teardown(self) -> None:
         if self._eval_client is not None:

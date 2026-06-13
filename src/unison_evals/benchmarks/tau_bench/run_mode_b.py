@@ -6,8 +6,8 @@ Usage:
 
 Prerequisites:
     - Local Unison API running at $UNISON_API_URL (default http://localhost:3001)
-    - Eval tenant provisioned (see your Unison server `.env` for UNISON_LOCAL_EVAL_TENANT_ID/USER_ID)
-    - UNISON_LOCAL_EVAL_TENANT_ID + USER_ID set in Unison's .env, API restarted
+    - Eval workspace provisioned (see your Unison server `.env` for UNISON_LOCAL_EVAL_WORKSPACE_ID/USER_ID)
+    - UNISON_LOCAL_EVAL_WORKSPACE_ID + USER_ID set in Unison's .env, API restarted
     - OPENAI_API_KEY (user-sim) + ANTHROPIC_API_KEY (agent inside Unison)
 """
 
@@ -28,7 +28,7 @@ from tau_bench.envs import get_env  # noqa: E402
 
 from .mode_b_agent import UnisonModeBAgent  # noqa: E402
 
-TENANT_ID = os.environ.get("UNISON_LOCAL_EVAL_TENANT_ID", "")
+WORKSPACE_ID = os.environ.get("UNISON_LOCAL_EVAL_WORKSPACE_ID", "")
 USER_ID = os.environ.get("UNISON_LOCAL_EVAL_USER_ID", "")
 USER_SIM_MODEL = "gpt-4o"
 USER_SIM_PROVIDER = "openai"
@@ -109,7 +109,7 @@ def main() -> int:
 
     agent = UnisonModeBAgent(
         unison_api_url=api_url,
-        tenant_id=TENANT_ID,
+        workspace_id=WORKSPACE_ID,
         user_id=USER_ID,
         model=agent_model,
         trajectory_dir=log_dir / "trajectories",
@@ -119,7 +119,7 @@ def main() -> int:
     print(f"  Unison API: {api_url}")
     print(f"  Agent model: {agent_model}")
     print(f"  User-sim: {USER_SIM_PROVIDER}/{USER_SIM_MODEL}")
-    print(f"  Tenant: {TENANT_ID}")
+    print(f"  Workspace: {WORKSPACE_ID}")
     print()
 
     results = []
@@ -159,7 +159,7 @@ def main() -> int:
 
     summary = {
         "mode": "B",
-        "tenant_id": TENANT_ID,
+        "workspace_id": WORKSPACE_ID,
         "agent_model": agent_model,
         "user_sim": f"{USER_SIM_PROVIDER}/{USER_SIM_MODEL}",
         "task_ids": task_ids,

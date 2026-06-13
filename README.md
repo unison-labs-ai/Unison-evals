@@ -115,7 +115,7 @@ $EDITOR .env                              # set UNISON_JWT, ANTHROPIC_API_KEY
 # To run the `unison-agent` system, you need a Unison brain server — get the
 # open-source server + clients at https://github.com/unison-labs-ai/unison-brain
 # Tip: when running against a local Unison server, leave UNISON_JWT blank and set
-# UNISON_LOCAL_EVAL_TENANT_ID in the brain server's .env — no JWT needed.
+# UNISON_LOCAL_EVAL_WORKSPACE_ID in the brain server's .env — no JWT needed.
 
 # 3. Run an eval — CLI
 uv run unison-evals run \

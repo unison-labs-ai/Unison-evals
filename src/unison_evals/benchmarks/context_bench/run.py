@@ -81,13 +81,13 @@ def _submodule_sha(path: Path, sub: str) -> str | None:
         return None
 
 
-def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
+def _manifest(model: str, judge_label: str, workspace_id: str | None) -> dict:
     """Reproducibility manifest — pinned to the run so a published number can be
     reproduced and audited (commit SHAs, models, dataset revision, isolation)."""
     from datetime import datetime
 
     return {
-        "isolation": "per-run ephemeral tenant",
+        "isolation": "per-run ephemeral workspace",
         "evals_commit": _git_sha(_REPO_ROOT),
         "letta_evals_submodule": _submodule_sha(_REPO_ROOT, "vendor/letta-evals"),
         "dataset": "vendor/letta-evals/.../filesystem_cloud.jsonl",
@@ -95,7 +95,7 @@ def _manifest(model: str, judge_label: str, tenant_id: str | None) -> dict:
         "judge": judge_label,
         "memory_mode": "fresh",
         "unison_api_url": os.environ.get("UNISON_API_URL", "http://localhost:3001"),
-        "ephemeral_tenant_id": tenant_id,
+        "ephemeral_workspace_id": workspace_id,
         "run_utc": datetime.now(UTC).isoformat(),
     }
 
@@ -145,17 +145,17 @@ def run_context_bench(
     total_score = 0.0
     total_cost = 0.0
 
-    # Per-run isolation: provision one ephemeral tenant + seed the fixed corpus
+    # Per-run isolation: provision one ephemeral workspace + seed the fixed corpus
     # once. Guaranteed teardown in `finally` so a crash mid-run never leaks the
-    # tenant.
+    # workspace.
     try:
         target.setup()
     except Exception as e:
         target.close()
         raise RuntimeError(f"provision/seed failed: {e}") from e
-    ran_tenant_id = target.tenant_id  # capture before close() nulls it
+    ran_workspace_id = target.workspace_id  # capture before close() nulls it
     print(
-        f"  Tenant:      {ran_tenant_id} (ephemeral, is_eval) — seeded {target.seeded_pages} pages"
+        f"  Workspace:      {ran_workspace_id} (ephemeral, is_eval) — seeded {target.seeded_pages} pages"
     )
     print()
 
@@ -242,7 +242,7 @@ def run_context_bench(
         "total_agent_cost_usd": total_cost,
         "task_ids": task_ids,
         "results": results,
-        "manifest": _manifest(model_label, judge_label, ran_tenant_id),
+        "manifest": _manifest(model_label, judge_label, ran_workspace_id),
     }
     out_path.write_text(json.dumps(summary, indent=2))
     print("─── Summary ──────────────────────────────────────────")

@@ -35,32 +35,32 @@ async def _connect() -> asyncpg.Connection:
     return await asyncpg.connect(_dsn())
 
 
-# Tenant-scoped tables to hard-delete between tasks so scoring stays iid (task N
+# Workspace-scoped tables to hard-delete between tasks so scoring stays iid (task N
 # must not see rows accumulated by tasks 1..N-1). This set is specific to the
 # server under test, so it is supplied at runtime via the `UNISON_RESET_TABLES`
 # env var (comma-separated, FK-safe order) rather than hardcoded — point it at
-# your server's tenant-scoped tables. Local-only path; requires direct DB access.
-_TENANT_SCOPED_RESET_TABLES = tuple(
+# your server's workspace-scoped tables. Local-only path; requires direct DB access.
+_WORKSPACE_SCOPED_RESET_TABLES = tuple(
     t.strip() for t in os.environ.get("UNISON_RESET_TABLES", "").split(",") if t.strip()
 )
 
 
-async def wipe_tenant(tenant_id: str) -> dict[str, int]:
-    """Hard-delete every tenant-scoped row for `tenant_id`. Returns
+async def wipe_workspace(workspace_id: str) -> dict[str, int]:
+    """Hard-delete every workspace-scoped row for `workspace_id`. Returns
     {table: rows_deleted}. Used between tasks to reset to iid state. Requires
-    `UNISON_RESET_TABLES` (comma-separated tenant-scoped tables, FK-safe order)."""
-    if not _TENANT_SCOPED_RESET_TABLES:
+    `UNISON_RESET_TABLES` (comma-separated workspace-scoped tables, FK-safe order)."""
+    if not _WORKSPACE_SCOPED_RESET_TABLES:
         raise RuntimeError(
             "UNISON_RESET_TABLES is not set — provide a comma-separated list of the "
-            "server's tenant-scoped tables to wipe between tasks (FK-safe order)."
+            "server's workspace-scoped tables to wipe between tasks (FK-safe order)."
         )
     conn = await _connect()
     try:
         counts: dict[str, int] = {}
-        for table in _TENANT_SCOPED_RESET_TABLES:
+        for table in _WORKSPACE_SCOPED_RESET_TABLES:
             result = await conn.execute(
-                f"DELETE FROM {table} WHERE tenant_id = $1",
-                tenant_id,
+                f"DELETE FROM {table} WHERE workspace_id = $1",
+                workspace_id,
             )
             counts[table] = int(result.split()[-1]) if result else 0
         return counts
@@ -69,13 +69,13 @@ async def wipe_tenant(tenant_id: str) -> dict[str, int]:
 
 
 # Back-compat wrapper — old callers expected a single int.
-async def wipe_wiki(tenant_id: str) -> int:
-    counts = await wipe_tenant(tenant_id)
+async def wipe_wiki(workspace_id: str) -> int:
+    counts = await wipe_workspace(workspace_id)
     return counts.get("cortex_documents", 0)
 
 
 async def seed_pages(
-    tenant_id: str,
+    workspace_id: str,
     user_id: str,
     pages: list[BrainPage],
 ) -> int:
@@ -86,29 +86,29 @@ async def seed_pages(
         await conn.executemany(
             """
             INSERT INTO cortex_documents
-                (tenant_id, kind, path, body_md, actor_kind, actor_id, created_by, owner_user_id)
+                (workspace_id, kind, path, body_md, actor_kind, actor_id, created_by, owner_user_id)
             VALUES ($1::uuid, $2, $3, $4, 'human', $5::text, $6::uuid, $7::uuid)
-            ON CONFLICT (tenant_id, path) WHERE parent_id IS NULL AND deleted_at IS NULL
+            ON CONFLICT (workspace_id, path) WHERE parent_id IS NULL AND deleted_at IS NULL
             DO UPDATE SET body_md = EXCLUDED.body_md, updated_at = now()
             """,
-            [(tenant_id, p.kind, p.path, p.body_md, user_id, user_id, user_id) for p in pages],
+            [(workspace_id, p.kind, p.path, p.body_md, user_id, user_id, user_id) for p in pages],
         )
         return len(pages)
     finally:
         await conn.close()
 
 
-async def snapshot_wiki(tenant_id: str, prefix: str = "/private/taubench/") -> dict[str, str]:
+async def snapshot_wiki(workspace_id: str, prefix: str = "/private/taubench/") -> dict[str, str]:
     """Return {path: body_md} for every live wiki page under prefix."""
     conn = await _connect()
     try:
         rows = await conn.fetch(
             """
             SELECT path, body_md FROM cortex_documents
-            WHERE tenant_id = $1 AND path LIKE $2 AND deleted_at IS NULL
+            WHERE workspace_id = $1 AND path LIKE $2 AND deleted_at IS NULL
             ORDER BY path
             """,
-            tenant_id,
+            workspace_id,
             f"{prefix}%",
         )
         return {r["path"]: r["body_md"] for r in rows}
@@ -117,18 +117,18 @@ async def snapshot_wiki(tenant_id: str, prefix: str = "/private/taubench/") -> d
 
 
 # Sync wrappers for non-async callers (the τ-bench Agent loop is sync).
-def wipe_wiki_sync(tenant_id: str) -> int:
-    return asyncio.run(wipe_wiki(tenant_id))
+def wipe_wiki_sync(workspace_id: str) -> int:
+    return asyncio.run(wipe_wiki(workspace_id))
 
 
-def wipe_tenant_sync(tenant_id: str) -> dict[str, int]:
-    return asyncio.run(wipe_tenant(tenant_id))
+def wipe_workspace_sync(workspace_id: str) -> dict[str, int]:
+    return asyncio.run(wipe_workspace(workspace_id))
 
 
 # ── Trajectory dump ──────────────────────────────────────────────────────
 
 
-async def dump_trajectory(tenant_id: str, session_id: str) -> list[dict]:
+async def dump_trajectory(workspace_id: str, session_id: str) -> list[dict]:
     """Reconstruct the agent's full per-turn trajectory from agent_messages.
 
     Each message row has `content` as a JSONB array of content parts
@@ -151,10 +151,10 @@ async def dump_trajectory(tenant_id: str, session_id: str) -> list[dict]:
             """
             SELECT created_at, role, content
             FROM agent_messages
-            WHERE tenant_id = $1 AND session_id = $2
+            WHERE workspace_id = $1 AND session_id = $2
             ORDER BY created_at, id
             """,
-            tenant_id,
+            workspace_id,
             session_id,
         )
     finally:
@@ -245,13 +245,13 @@ async def dump_trajectory(tenant_id: str, session_id: str) -> list[dict]:
     return out
 
 
-def dump_trajectory_sync(tenant_id: str, session_id: str) -> list[dict]:
-    return asyncio.run(dump_trajectory(tenant_id, session_id))
+def dump_trajectory_sync(workspace_id: str, session_id: str) -> list[dict]:
+    return asyncio.run(dump_trajectory(workspace_id, session_id))
 
 
-def seed_pages_sync(tenant_id: str, user_id: str, pages: list[BrainPage]) -> int:
-    return asyncio.run(seed_pages(tenant_id, user_id, pages))
+def seed_pages_sync(workspace_id: str, user_id: str, pages: list[BrainPage]) -> int:
+    return asyncio.run(seed_pages(workspace_id, user_id, pages))
 
 
-def snapshot_wiki_sync(tenant_id: str, prefix: str = "/private/taubench/") -> dict[str, str]:
-    return asyncio.run(snapshot_wiki(tenant_id, prefix))
+def snapshot_wiki_sync(workspace_id: str, prefix: str = "/private/taubench/") -> dict[str, str]:
+    return asyncio.run(snapshot_wiki(workspace_id, prefix))
